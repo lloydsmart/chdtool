@@ -140,6 +140,102 @@ get_file_size() {
     fi
 }
 
+# ---------- M3U (per-iteration) helpers ----------
+# Trim leading/trailing spaces/dots/underscores/dashes
+trim() {
+    local s="$*"
+    s="${s##+([[:space:]._-])}"
+    s="${s%%+([[:space:]._-])}"
+    printf "%s" "$s"
+}
+
+# Parse disc info from a base name (no extension).
+# On success, echoes "<base>|<disc_num>" and returns 0; else returns 1.
+parse_disc_info() {
+    local name="$1"
+    # A) "… Disc 2", "… CD3", "… Disk 1", "… GD-ROM 2"
+    local re_a='^(.*?)[[:space:]._-]*\(?([Dd][Ii][Ss][Cc]|[Cc][Dd]|[Dd][Ii][Ss][Kk]|[Gg][Dd](?:-[Rr][Oo][Mm])?)[[:space:]]*([0-9]+)\)?([[:space:]]*.*)?$'
+    # B) "… (1 of 2)" / "… 1 of 2" / "… 1/2"
+    local re_b='^(.*?)[[:space:]._-]*\(?([0-9]+)[[:space:]]*(?:of|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$'
+
+    if [[ "$name" =~ $re_a ]]; then
+        local base="${BASH_REMATCH[1]}"; local num="${BASH_REMATCH[3]}"
+        base="$(trim "$base")"
+        [[ -n "$base" && -n "$num" ]] && echo "$base|$num" && return 0
+    fi
+    if [[ "$name" =~ $re_b ]]; then
+        local base="${BASH_REMATCH[1]}"; local num="${BASH_REMATCH[2]}"
+        base="$(trim "$base")"
+        [[ -n "$base" && -n "$num" ]] && echo "$base|$num" && return 0
+    fi
+    return 1
+}
+
+# Build/refresh a single M3U for a given base in one directory.
+# We only consider CHDs that share the parsed base (case-insensitive).
+generate_m3u_for_base() {
+    local outdir="$1"
+    local base="$2"
+    local -a members=()
+
+    local f stem p p_base
+    while IFS= read -r -d '' f; do
+        stem="${f##*/}"; stem="${stem%.chd}"
+        if p="$(parse_disc_info "$stem")"; then
+            p_base="${p%%|*}"
+            if [[ "${p_base,,}" == "${base,,}" ]]; then
+                members+=("$f")
+            fi
+        fi
+    done < <(find "$outdir" -maxdepth 1 -type f -iname "*.chd" -print0)
+
+    if (( ${#members[@]} < 2 )); then
+        log "ℹ️ Not generating M3U - fewer than two CHDs found for base: $base"
+        return 0
+    fi
+
+    # Sort by parsed disc number
+    local sorted
+    sorted="$(
+      for f in "${members[@]}"; do
+        stem="${f##*/}"; stem="${stem%.chd}"
+        p="$(parse_disc_info "$stem")"
+        echo "${p##*|}|$f"
+      done | sort -t'|' -k1,1n | cut -d'|' -f2
+    )"
+    mapfile -t members <<< "$sorted"
+
+    # Write idempotently (relative file names in body)
+    local m3u_path="$outdir/${base}.m3u"
+    local tmp_m3u="$m3u_path.tmp"
+    : > "$tmp_m3u"
+    for f in "${members[@]}"; do
+        printf '%s\n' "$(basename "$f")" >> "$tmp_m3u"
+    done
+    if [[ -f "$m3u_path" ]] && cmp -s "$tmp_m3u" "$m3u_path"; then
+        rm -f "$tmp_m3u"
+        log "🧾 M3U up-to-date: $m3u_path"
+    else
+        mv -f "$tmp_m3u" "$m3u_path"
+        [[ -f "$m3u_path" ]] && log "📝 Updated M3U: $m3u_path" || log "🆕 Created M3U: $m3u_path"
+    fi
+}
+
+# Decide if $chd_base looks like a multi-disc title and (re)generate its M3U now.
+maybe_generate_m3u_for() {
+    local chd_base="$1"   # e.g. "Virtua Fighter (Disc 2)"
+    local outdir="$2"     # directory where CHDs live
+    local parsed
+    if ! parsed="$(parse_disc_info "$chd_base")"; then
+        log "ℹ️ Not generating M3U - CHD not part of multi-disc set: $chd_base"
+        return 0
+    fi
+    local base="${parsed%%|*}"
+    log "🔎 M3U check — base: $base"
+    generate_m3u_for_base "$outdir" "$base"
+}
+# ---------- end M3U helpers ----------
+
 verify_chds() {
     local outdir="$1"; shift
     local chds=("$@")
@@ -374,6 +470,13 @@ process_input() {
         else
             log "📦 Keeping original input file due to KEEP_ORIGINALS=true"
         fi
+        # Per-iteration M3U generation for already-present sets
+        if [[ ${#expected_chds[@]} -gt 0 ]]; then
+            local chd_base
+            chd_base="$(basename "${expected_chds[0]}" .chd)"
+            log "🔤 Raw base name: $chd_base"
+            maybe_generate_m3u_for "$chd_base" "$outdir"
+        fi
         return 0
     fi
 
@@ -449,6 +552,14 @@ process_input() {
             failures=$((failures + 1))
             log "⚠️ CHD verification failed after conversion for $input_file, keeping original"
         fi
+    fi
+
+    # Per-iteration M3U generation for newly written CHDs
+    if [[ ${#expected_chds[@]} -gt 0 ]]; then
+        local chd_base
+        chd_base="$(basename "${expected_chds[0]}" .chd)"
+        log "🔤 Raw base name: $chd_base"
+        maybe_generate_m3u_for "$chd_base" "$outdir"
     fi
 
     # Per-iteration temp cleanup
