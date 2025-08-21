@@ -180,11 +180,13 @@ _draw_progress() {
   (( barw < 10 )) && barw=10
   # Calculate filled cells
   # pct can be "27.3" -> use integer math by scaling
-  local scaled=$(printf "%.0f" "$(awk "BEGIN {print ($pct/100.0)*$barw}")")
+  local scaled
+  scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
   (( scaled > barw )) && scaled=$barw
   local filled=$scaled
   local empty=$(( barw - filled ))
-  local bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
+  local bar
+  bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
   local text="$left $bar"
   if (( ${#text} > cols-1 )); then
     # If still too long, trim the left part
@@ -318,8 +320,17 @@ generate_m3u_for_base() {
         rm -f "$tmp_m3u"
         log "🧾 M3U up-to-date: $m3u_path"
     else
+        # Remember pre-move existence to log correctly
+        local _m3u_existed=false
+        [[ -f "$m3u_path" ]] && _m3u_existed=true
+
         mv -f "$tmp_m3u" "$m3u_path"
-        [[ -f "$m3u_path" ]] && log "📝 Updated M3U: $m3u_path" || log "🆕 Created M3U: $m3u_path"
+
+        if [[ "$_m3u_existed" == true ]]; then
+            log "📝 Updated M3U: $m3u_path"
+        else
+            log "🆕 Created M3U: $m3u_path"
+        fi
     fi
 }
 
