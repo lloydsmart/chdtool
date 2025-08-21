@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Prepare artifacts
+        run: |
+          set -euo pipefail
+          # Ensure script is executable and provide a no-extension copy
+          chmod +x chdtool.sh || true
+          cp chdtool.sh chdtool
+
+          # Package distributables
+          mkdir -p dist
+          tar -czf "dist/chdtool-${GITHUB_REF_NAME}.tar.gz" chdtool README.md LICENSE CHANGELOG.md || true
+          zip -j "dist/chdtool-${GITHUB_REF_NAME}.zip" chdtool README.md LICENSE CHANGELOG.md || true
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+            chdtool.sh
+          draft: false
+          # If tag contains a hyphen (e.g., v1.0.0-rc.1), mark as prerelease
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
