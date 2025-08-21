@@ -185,9 +185,9 @@ verify_chds() {
 validate_cue_file() {
     local cue_file="$1"
     local cuedir
-    cuedir = "$(dirname "$cue_file")"
+    cuedir="$(dirname "$cue_file")"
     local cue_basename
-    cue_basename = "$(basename "$cue_file")"
+    cue_basename="$(basename "$cue_file")"
     local missing=0
 
     mapfile -t actual_files < <(find "$cuedir" -maxdepth 1 -type f -printf "%f\n")
@@ -271,7 +271,7 @@ convert_disc_file() {
     fi
 
     local base
-    base = "$(get_chd_basename "$file")"
+    base="$(get_chd_basename "$file")"
     local chd_path="$outdir/$base.chd"
     local tmp_chd="$outdir/$base.chd.tmp"
 
@@ -304,7 +304,7 @@ process_input() {
     local input_file="$1"
     local ext="${input_file##*.}"; ext="${ext,,}"
     local outdir
-    outdir = "$(dirname "$input_file")"
+    outdir="$(dirname "$input_file")"
 
     local archive_entries=()
     local disc_files=()
