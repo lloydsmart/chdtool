@@ -4,13 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+---
+
 ## [Unreleased]
 
 ### Added
-- **CD/DVD detection in conversion**: Script now distinguishes between CD and DVD images.
-  - Uses `createcd` for CDs and `createdvd` for DVDs (if supported by `chdman`).
-  - Falls back to `createcd` with a warning if `createdvd` is unavailable.
-  - Logs include 💿 (CD) and 📀 (DVD) icons for clarity.
+- Planned support for `.m3u` playlist generation (multi-disc sets).
+
+### Roadmap
+- [ ] Implement `.m3u` playlist generation.
+- [ ] Additional heuristics for more robust CD/DVD detection.
+- [ ] Broader archive support (e.g., CHD inside 7z).
+- [ ] Automated test suite.
 
 ---
 
