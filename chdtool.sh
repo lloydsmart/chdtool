@@ -140,6 +140,110 @@ get_file_size() {
     fi
 }
 
+# ---------- chdman progress handling ----------
+# Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
+PROGRESS_STYLE_DEFAULT="auto"
+PROGRESS_THROTTLE_MS=150  # reduce flicker
+
+# Print N copies of a char
+_repeat_char() { local n=$1 c=$2 out=""; while (( n-- > 0 )); do out+="$c"; done; printf "%s" "$out"; }
+
+# Draw a single-line status (bar or line) to stderr, staying on one row.
+_draw_progress() {
+  local phase="$1" pct="$2" ratio="$3"
+  local style="${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}"
+
+  # auto: choose bar if interactive TTY, else none
+  if [[ "$style" == "auto" ]]; then
+    if [[ -t 2 ]]; then style="bar"; else style="none"; fi
+  fi
+  [[ "$style" == "none" ]] && return 0
+
+  local cols="${COLUMNS:-}"
+  [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
+  [[ -z "$cols" ]] && cols=80
+
+  local left="⏳ $phase ${pct}%%"
+  [[ -n "$ratio" ]] && left+=" (ratio=${ratio}%%)"
+
+  if [[ "$style" == "line" ]]; then
+    # Make sure we don't wrap: trim right to terminal width
+    local text="$left"
+    if (( ${#text} > cols-1 )); then text="${text:0:cols-1}"; fi
+    printf "\r%s\033[K" "$text" >&2
+    return 0
+  fi
+
+  # bar style
+  local reserved=$(( ${#left} + 4 ))   # space + brackets + space
+  local barw=$(( cols - reserved ))
+  (( barw < 10 )) && barw=10
+  # Calculate filled cells
+  # pct can be "27.3" -> use integer math by scaling
+  local scaled
+  scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
+  (( scaled > barw )) && scaled=$barw
+  local filled=$scaled
+  local empty=$(( barw - filled ))
+  local bar
+  bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
+  local text="$left $bar"
+  if (( ${#text} > cols-1 )); then
+    # If still too long, trim the left part
+    local trim=$(( ${#text} - (cols-1) ))
+    left="${left:0:${#left}-trim}"
+    text="$left $bar"
+  fi
+  printf "\r%s\033[K" "$text" >&2
+}
+
+# Parse chdman stderr, render single-line progress, pass through non-progress lines
+_chdman_progress_filter() {
+  local last_draw=0 last_pct="" phase="Compressing" ratio=""
+  local now ms
+  while IFS= read -r line; do
+    # If it's a normal diagnostic line, break the progress line and print it
+    if [[ ! "$line" =~ %\ complete ]]; then
+      if [[ -n "$last_pct" ]]; then printf "\n" >&2; last_pct=""; fi
+      printf "%s\n" "$line" >&2
+      continue
+    fi
+    # Extract percent (first match) and optional ratio
+    if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
+      local pct="${BASH_REMATCH[1]}"
+      # Try to extract phase (first word before comma), if present
+      if [[ "$line" =~ ^([A-Za-z]+), ]]; then phase="${BASH_REMATCH[1]}"; fi
+      # Extract ratio if present
+      if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; fi
+
+      # Throttle draws a bit to avoid flicker
+      now=$(date +%s%3N 2>/dev/null || date +%s)
+      if [[ "$now" == *s ]]; then ms=$now; else ms=$now; fi
+      if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
+        _draw_progress "$phase" "$pct" "$ratio"
+        last_draw=$ms
+        last_pct="$pct"
+      fi
+    fi
+  done
+  # End: if we drew progress, close the line
+  [[ -n "$last_pct" ]] && printf "\n" >&2
+}
+
+# Wrapper to run chdman with a clean one-line progress display.
+# Usage: run_chdman_progress createcd -i "$in" -o "$out"
+run_chdman_progress() {
+  local bin="${CHDMAN_BIN:-chdman}"
+  if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
+    # Interactive: filter stderr through progress; keep non-progress diagnostics
+    "$bin" "$@" 2> >(_chdman_progress_filter)
+  else
+    # Non-interactive (CI/log files): keep original stderr without spam filtering
+    "$bin" "$@"
+  fi
+}
+# ---------- end chdman progress ----------
+
 # ---------- M3U (per-iteration) helpers ----------
 # Trim leading/trailing spaces/dots/underscores/dashes
 trim() {
@@ -424,7 +528,7 @@ convert_disc_file() {
 
     log "$icon Detected $disc_type image → using chdman $subcmd"
     log "🔧 Converting: $file -> $tmp_chd"
-    chdman "$subcmd" -i "$file" -o "$tmp_chd" | verify_output_log
+    run_chdman_progress "$subcmd" -i "$file" -o "$tmp_chd" | verify_output_log
 
     return 0
 }
