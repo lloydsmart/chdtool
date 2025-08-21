@@ -1,0 +1,17 @@
+logs/
+*.log
+*.chd.tmp
+*.tmp
+tmp/
+# System
+.DS_Store
+Thumbs.db
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+# Archives you might test with (optional)
+*.zip
+*.rar
+*.7z
