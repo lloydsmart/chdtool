@@ -216,8 +216,15 @@ generate_m3u_for_base() {
         rm -f "$tmp_m3u"
         log "🧾 M3U up-to-date: $m3u_path"
     else
+        # Remember pre-move existence to log Created vs Updated correctly
+        local _m3u_existed=false
+        [[ -f "$m3u_path" ]] && _m3u_existed=true
         mv -f "$tmp_m3u" "$m3u_path"
-        [[ -f "$m3u_path" ]] && log "📝 Updated M3U: $m3u_path" || log "🆕 Created M3U: $m3u_path"
+        if [[ "$_m3u_existed" == true ]]; then
+            log "📝 Updated M3U: $m3u_path"
+        else
+            log "🆕 Created M3U: $m3u_path"
+        fi
     fi
 }
 
