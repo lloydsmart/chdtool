@@ -184,8 +184,10 @@ verify_chds() {
 
 validate_cue_file() {
     local cue_file="$1"
-    local cuedir="$(dirname "$cue_file")"
-    local cue_basename="$(basename "$cue_file")"
+    local cuedir
+    cuedir = "$(dirname "$cue_file")"
+    local cue_basename
+    cue_basename = "$(basename "$cue_file")"
     local missing=0
 
     mapfile -t actual_files < <(find "$cuedir" -maxdepth 1 -type f -printf "%f\n")
@@ -268,7 +270,8 @@ convert_disc_file() {
         fi
     fi
 
-    local base="$(get_chd_basename "$file")"
+    local base
+    base = "$(get_chd_basename "$file")"
     local chd_path="$outdir/$base.chd"
     local tmp_chd="$outdir/$base.chd.tmp"
 
@@ -300,7 +303,8 @@ convert_disc_file() {
 process_input() {
     local input_file="$1"
     local ext="${input_file##*.}"; ext="${ext,,}"
-    local outdir="$(dirname "$input_file")"
+    local outdir
+    outdir = "$(dirname "$input_file")"
 
     local archive_entries=()
     local disc_files=()
@@ -312,7 +316,7 @@ process_input() {
 
     local temp_dir=""
 
-    if [[ " ${archive_exts[*]} " =~ " ${ext} " ]]; then
+    if is_in_list "$ext" "${archive_exts[@]}"; then
         archives_processed=$((archives_processed + 1))
         case "$ext" in
             zip) mapfile -t archive_entries < <(unzip -Z1 "$input_file" | grep -Ei "$ext_regex") ;;
@@ -324,7 +328,7 @@ process_input() {
         done
     fi
 
-    if [[ " ${disc_exts[*]} " =~ " ${ext} " ]]; then
+    if is_in_list "$ext" "${disc_exts[@]}"; then
         disc_files+=("$input_file")
         expected_chds+=("$(get_chd_basename "$input_file").chd")
     fi
@@ -348,7 +352,8 @@ process_input() {
 
     # Extract archive to temp and discover disc files
     if is_in_list "$ext" "${archive_exts[@]}"; then
-        temp_dir="$(mktemp -d -t "chdconv_$(basename "$input_file" .${ext})_XXXX")"
+        local temp_dir
+        temp_dir="$(mktemp -d -t "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
         log "📦 Extracting $input_file to $temp_dir"
         case "$ext" in
             zip) unzip -qq "$input_file" -d "$temp_dir" ;;
@@ -403,7 +408,7 @@ process_input() {
             if [[ $archive_size_bytes -gt 0 ]]; then
                 local saving=$((archive_size_bytes - archive_chd_size))
                 local saving_percent=$((100 * saving / archive_size_bytes))
-                log "📉 Space saving for $(basename "$input_file"): $(human_readable $archive_size_bytes) → $(human_readable $archive_chd_size), saved $(human_readable $saving) (${saving_percent}%)"
+                log "📉 Space saving for $(basename "$input_file"): $(human_readable "$archive_size_bytes") → $(human_readable "$archive_chd_size"), saved $(human_readable "$saving") (${saving_percent}%)"
                 total_original_size=$((total_original_size + archive_size_bytes))
                 total_chd_size=$((total_chd_size + archive_chd_size))
             fi
