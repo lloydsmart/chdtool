@@ -1,8 +1,6 @@
 # 🎮 chdtool  
 
-[![License](https://img.shields.io/github/license/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/blob/master/LICENSE)  
-[![Latest Release](https://img.shields.io/github/v/release/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/releases)  
-[![ShellCheck](https://github.com/lloydsmart/chdtool/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/lloydsmart/chdtool/actions/workflows/shellcheck.yml)
+[![License](https://img.shields.io/github/license/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/blob/master/LICENSE)  [![Latest Release](https://img.shields.io/github/v/release/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/releases)  [![ShellCheck](https://github.com/lloydsmart/chdtool/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/lloydsmart/chdtool/actions/workflows/shellcheck.yml)
 
 A Bash script that converts CD/DVD disc images (ZIP/RAR/7Z/ISO/CUE/GDI/CCD) into CHD using chdman.
 
