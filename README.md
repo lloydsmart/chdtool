@@ -45,10 +45,35 @@ Examples:
 ## 📋 Example Run
 
 ```text
-[2025-07-05 12:07:24] 🚀 Script started, input dir: /mnt/roms/saturn
-[2025-07-05 12:07:24] 💿 Converting: Game.cue -> Game.chd.tmp
-[2025-07-05 12:07:24] ✅ Verified CHD: Game.chd
-[2025-07-05 12:07:24] 📉 Space saving for Game.cue: 700 MB → 350 MB, saved 350 MB (50%)
+[2025-07-05 14:00:12] 🚀 Script started, input dir: /mnt/retronas/roms/sega/saturn/
+[2025-07-05 14:00:12] ℹ️ Using chdman - MAME Compressed Hunks of Data (CHD) manager 0.251 (unknown)
+[2025-07-05 14:00:12] 🔎 Found 6 inputs
+[2025-07-05 14:00:12] ▶️ Processing file: /mnt/retronas/roms/sega/saturn/Virtua Fighter (Europe).zip
+[2025-07-05 14:00:12] 📦 Extracting Virtua Fighter (Europe).zip to /tmp/chdconv_Virtua Fighter (Europe)_a1B2
+[2025-07-05 14:00:14] 💿 Converting: Virtua Fighter (Europe).cue → Virtua Fighter (Europe).chd.tmp
+Compression complete ... final ratio = 58.7%
+[2025-07-05 14:01:02] 🔎 Verifying: Virtua Fighter (Europe).chd.tmp
+[2025-07-05 14:01:20] ✅ Verified CHD: Virtua Fighter (Europe).chd.tmp
+[2025-07-05 14:01:20] 🔄 Replaced old CHD with new verified CHD: Virtua Fighter (Europe).chd
+[2025-07-05 14:01:20] 🗑️ Removing original input file: Virtua Fighter (Europe).zip
+[2025-07-05 14:01:20] 📉 Space saving for Virtua Fighter (Europe).zip: 640 MB → 375 MB, saved 265 MB (41%)
+[2025-07-05 14:01:20] 🔤 Raw base name: Virtua Fighter (Europe)
+[2025-07-05 14:01:20] 🔤 Normalized base name for M3U: virtua fighter
+[2025-07-05 14:01:20] 🔍 Found 1 CHD candidate, remaining inputs: yes
+[2025-07-05 14:01:20] 🧹 Cleaned up temp dir on exit: /tmp/chdconv_Virtua Fighter (Europe)_a1B2
+[2025-07-05 14:01:20] 📊 Summary:
+[2025-07-05 14:01:20] 📦 Total original size: 5 GB
+[2025-07-05 14:01:20] 💿 Total CHD size: 4 GB
+[2025-07-05 14:01:20] 📉 Total space saved: 1 GB (23%)
+[2025-07-05 14:01:20] 📦 Archives processed: 15
+[2025-07-05 14:01:20] 💿 CHDs created:       15
+[2025-07-05 14:01:20] ❌ Failures:           0
+[2025-07-05 14:01:20] ⏱️ Elapsed time: 55m 56s
+[2025-07-05 14:01:20] ✅ Done!
+
+...
+
+[2025-07-05 14:01:21] 🎉 All inputs processed successfully!
 ```
 
 ---

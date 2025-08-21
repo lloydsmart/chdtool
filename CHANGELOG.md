@@ -4,18 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
----
-
 ## [Unreleased]
 
 ### Added
-- Planned support for `.m3u` playlist generation (multi-disc sets).
-
-### Roadmap
-- [ ] Implement `.m3u` playlist generation.
-- [ ] Additional heuristics for more robust CD/DVD detection.
-- [ ] Broader archive support (e.g., CHD inside 7z).
-- [ ] Automated test suite.
+- **CD/DVD detection in conversion**: Script now distinguishes between CD and DVD images.
+  - Uses `createcd` for CDs and `createdvd` for DVDs (if supported by `chdman`).
+  - Falls back to `createcd` with a warning if `createdvd` is unavailable.
+  - Logs include 💿 (CD) and 📀 (DVD) icons for clarity.
 
 ---
 
@@ -27,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Prevented unrelated games with similar names from being grouped into the same `.m3u`.
 - Correct handling of multi-disc `.m3u` creation on a per-loop basis.
+
+### Example
+```
+[2025-07-05 14:00:12] ▶️ Processing file: /mnt/retronas/roms/sega/saturn/Virtua Fighter (Europe).zip
+[2025-07-05 14:00:14] 💿 Converting: Virtua Fighter (Europe).cue → Virtua Fighter (Europe).chd.tmp
+[2025-07-05 14:01:20] ✅ Verified CHD: Virtua Fighter (Europe).chd.tmp
+[2025-07-05 14:01:20] 🔄 Replaced old CHD with new verified CHD: Virtua Fighter (Europe).chd
+[2025-07-05 14:01:20] 📉 Space saving for Virtua Fighter (Europe).zip: 640 MB → 375 MB, saved 265 MB (41%)
+```
 
 ---
 
