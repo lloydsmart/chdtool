@@ -140,6 +140,215 @@ get_file_size() {
     fi
 }
 
+# ---------- chdman progress handling ----------
+# Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
+PROGRESS_STYLE_DEFAULT="auto"
+PROGRESS_THROTTLE_MS=150  # reduce flicker
+
+# Print N copies of a char
+_repeat_char() { local n=$1 c=$2 out=""; while (( n-- > 0 )); do out+="$c"; done; printf "%s" "$out"; }
+
+# Draw a single-line status (bar or line) to stderr, staying on one row.
+_draw_progress() {
+  local phase="$1" pct="$2" ratio="$3"
+  local style="${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}"
+
+  # auto: choose bar if interactive TTY, else none
+  if [[ "$style" == "auto" ]]; then
+    if [[ -t 2 ]]; then style="bar"; else style="none"; fi
+  fi
+  [[ "$style" == "none" ]] && return 0
+
+  local cols="${COLUMNS:-}"
+  [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
+  [[ -z "$cols" ]] && cols=80
+
+  local left="⏳ $phase ${pct}%%"
+  [[ -n "$ratio" ]] && left+=" (ratio=${ratio}%%)"
+
+  if [[ "$style" == "line" ]]; then
+    # Make sure we don't wrap: trim right to terminal width
+    local text="$left"
+    if (( ${#text} > cols-1 )); then text="${text:0:cols-1}"; fi
+    printf "\r%s\033[K" "$text" >&2
+    return 0
+  fi
+
+  # bar style
+  local reserved=$(( ${#left} + 4 ))   # space + brackets + space
+  local barw=$(( cols - reserved ))
+  (( barw < 10 )) && barw=10
+  # Calculate filled cells
+  # pct can be "27.3" -> use integer math by scaling
+  local scaled
+  scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
+  (( scaled > barw )) && scaled=$barw
+  local filled=$scaled
+  local empty=$(( barw - filled ))
+  local bar
+  bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
+  local text="$left $bar"
+  if (( ${#text} > cols-1 )); then
+    # If still too long, trim the left part
+    local trim=$(( ${#text} - (cols-1) ))
+    left="${left:0:${#left}-trim}"
+    text="$left $bar"
+  fi
+  printf "\r%s\033[K" "$text" >&2
+}
+
+# Parse chdman stderr, render single-line progress, pass through non-progress lines
+_chdman_progress_filter() {
+  local last_draw=0 last_pct="" phase="Compressing" ratio=""
+  local now ms
+  while IFS= read -r line; do
+    # If it's a normal diagnostic line, break the progress line and print it
+    if [[ ! "$line" =~ %\ complete ]]; then
+      if [[ -n "$last_pct" ]]; then printf "\n" >&2; last_pct=""; fi
+      printf "%s\n" "$line" >&2
+      continue
+    fi
+    # Extract percent (first match) and optional ratio
+    if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
+      local pct="${BASH_REMATCH[1]}"
+      # Try to extract phase (first word before comma), if present
+      if [[ "$line" =~ ^([A-Za-z]+), ]]; then phase="${BASH_REMATCH[1]}"; fi
+      # Extract ratio if present
+      if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; fi
+
+      # Throttle draws a bit to avoid flicker
+      now=$(date +%s%3N 2>/dev/null || date +%s)
+      if [[ "$now" == *s ]]; then ms=$now; else ms=$now; fi
+      if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
+        _draw_progress "$phase" "$pct" "$ratio"
+        last_draw=$ms
+        last_pct="$pct"
+      fi
+    fi
+  done
+  # End: if we drew progress, close the line
+  [[ -n "$last_pct" ]] && printf "\n" >&2
+}
+
+# Wrapper to run chdman with a clean one-line progress display.
+# Usage: run_chdman_progress createcd -i "$in" -o "$out"
+run_chdman_progress() {
+  local bin="${CHDMAN_BIN:-chdman}"
+  if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
+    # Interactive: filter stderr through progress; keep non-progress diagnostics
+    "$bin" "$@" 2> >(_chdman_progress_filter)
+  else
+    # Non-interactive (CI/log files): keep original stderr without spam filtering
+    "$bin" "$@"
+  fi
+}
+# ---------- end chdman progress ----------
+
+# ---------- M3U (per-iteration) helpers ----------
+# Trim leading/trailing spaces/dots/underscores/dashes
+trim() {
+    local s="$*"
+    s="${s##+([[:space:]._-])}"
+    s="${s%%+([[:space:]._-])}"
+    printf "%s" "$s"
+}
+
+# Parse disc info from a base name (no extension).
+# On success, echoes "<base>|<disc_num>" and returns 0; else returns 1.
+parse_disc_info() {
+    local name="$1"
+    # A) "… Disc 2", "… CD3", "… Disk 1", "… GD-ROM 2"
+    local re_a='^(.*?)[[:space:]._-]*\(?([Dd][Ii][Ss][Cc]|[Cc][Dd]|[Dd][Ii][Ss][Kk]|[Gg][Dd](?:-[Rr][Oo][Mm])?)[[:space:]]*([0-9]+)\)?([[:space:]]*.*)?$'
+    # B) "… (1 of 2)" / "… 1 of 2" / "… 1/2"
+    local re_b='^(.*?)[[:space:]._-]*\(?([0-9]+)[[:space:]]*(?:of|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$'
+
+    if [[ "$name" =~ $re_a ]]; then
+        local base="${BASH_REMATCH[1]}"; local num="${BASH_REMATCH[3]}"
+        base="$(trim "$base")"
+        [[ -n "$base" && -n "$num" ]] && echo "$base|$num" && return 0
+    fi
+    if [[ "$name" =~ $re_b ]]; then
+        local base="${BASH_REMATCH[1]}"; local num="${BASH_REMATCH[2]}"
+        base="$(trim "$base")"
+        [[ -n "$base" && -n "$num" ]] && echo "$base|$num" && return 0
+    fi
+    return 1
+}
+
+# Build/refresh a single M3U for a given base in one directory.
+# We only consider CHDs that share the parsed base (case-insensitive).
+generate_m3u_for_base() {
+    local outdir="$1"
+    local base="$2"
+    local -a members=()
+
+    local f stem p p_base
+    while IFS= read -r -d '' f; do
+        stem="${f##*/}"; stem="${stem%.chd}"
+        if p="$(parse_disc_info "$stem")"; then
+            p_base="${p%%|*}"
+            if [[ "${p_base,,}" == "${base,,}" ]]; then
+                members+=("$f")
+            fi
+        fi
+    done < <(find "$outdir" -maxdepth 1 -type f -iname "*.chd" -print0)
+
+    if (( ${#members[@]} < 2 )); then
+        log "ℹ️ Not generating M3U - fewer than two CHDs found for base: $base"
+        return 0
+    fi
+
+    # Sort by parsed disc number
+    local sorted
+    sorted="$(
+      for f in "${members[@]}"; do
+        stem="${f##*/}"; stem="${stem%.chd}"
+        p="$(parse_disc_info "$stem")"
+        echo "${p##*|}|$f"
+      done | sort -t'|' -k1,1n | cut -d'|' -f2
+    )"
+    mapfile -t members <<< "$sorted"
+
+    # Write idempotently (relative file names in body)
+    local m3u_path="$outdir/${base}.m3u"
+    local tmp_m3u="$m3u_path.tmp"
+    : > "$tmp_m3u"
+    for f in "${members[@]}"; do
+        printf '%s\n' "$(basename "$f")" >> "$tmp_m3u"
+    done
+    if [[ -f "$m3u_path" ]] && cmp -s "$tmp_m3u" "$m3u_path"; then
+        rm -f "$tmp_m3u"
+        log "🧾 M3U up-to-date: $m3u_path"
+    else
+        # Remember pre-move existence to log correctly
+        local _m3u_existed=false
+        [[ -f "$m3u_path" ]] && _m3u_existed=true
+
+        mv -f "$tmp_m3u" "$m3u_path"
+
+        if [[ "$_m3u_existed" == true ]]; then
+            log "📝 Updated M3U: $m3u_path"
+        else
+            log "🆕 Created M3U: $m3u_path"
+        fi
+    fi
+}
+
+# Decide if $chd_base looks like a multi-disc title and (re)generate its M3U now.
+maybe_generate_m3u_for() {
+    local chd_base="$1"   # e.g. "Virtua Fighter (Disc 2)"
+    local outdir="$2"     # directory where CHDs live
+    local parsed
+    if ! parsed="$(parse_disc_info "$chd_base")"; then
+        log "ℹ️ Not generating M3U - CHD not part of multi-disc set: $chd_base"
+        return 0
+    fi
+    local base="${parsed%%|*}"
+    log "🔎 M3U check — base: $base"
+    generate_m3u_for_base "$outdir" "$base"
+}
+# ---------- end M3U helpers ----------
+
 verify_chds() {
     local outdir="$1"; shift
     local chds=("$@")
@@ -321,7 +530,7 @@ convert_disc_file() {
 
     log "$icon Detected $disc_type image → using chdman $subcmd"
     log "🔧 Converting: $file -> $tmp_chd"
-    chdman "$subcmd" -i "$file" -o "$tmp_chd" | verify_output_log
+    run_chdman_progress "$subcmd" -i "$file" -o "$tmp_chd" | verify_output_log
 
     return 0
 }
@@ -373,6 +582,13 @@ process_input() {
             rm -f "$input_file"
         else
             log "📦 Keeping original input file due to KEEP_ORIGINALS=true"
+        fi
+        # Per-iteration M3U generation for already-present sets
+        if [[ ${#expected_chds[@]} -gt 0 ]]; then
+            local chd_base
+            chd_base="$(basename "${expected_chds[0]}" .chd)"
+            log "🔤 Raw base name: $chd_base"
+            maybe_generate_m3u_for "$chd_base" "$outdir"
         fi
         return 0
     fi
@@ -449,6 +665,14 @@ process_input() {
             failures=$((failures + 1))
             log "⚠️ CHD verification failed after conversion for $input_file, keeping original"
         fi
+    fi
+
+    # Per-iteration M3U generation for newly written CHDs
+    if [[ ${#expected_chds[@]} -gt 0 ]]; then
+        local chd_base
+        chd_base="$(basename "${expected_chds[0]}" .chd)"
+        log "🔤 Raw base name: $chd_base"
+        maybe_generate_m3u_for "$chd_base" "$outdir"
     fi
 
     # Per-iteration temp cleanup
