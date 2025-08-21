@@ -1,17 +1,23 @@
-logs/
-*.log
-*.chd.tmp
-*.tmp
-tmp/
-# System
+# OS cruft
 .DS_Store
 Thumbs.db
-# Editors
-.vscode/
+
+# Editors/IDEs
 .idea/
+.vscode/
 *.swp
-*.swo
-# Archives you might test with (optional)
+*~
+
+# Logs
+logs/
+*.log
+
+# Archives or temp outputs (just in case)
 *.zip
-*.rar
 *.7z
+*.rar
+*.tmp
+
+# Python virtual envs (if any tooling is added later)
+.venv/
+env/
