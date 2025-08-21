@@ -58,7 +58,7 @@ is_in_list() {
     [[ " ${list[*]} " =~ (^|[[:space:]])"$value"([[:space:]]|$) ]]
 }
 
-required_commands=(chdman unzip unrar 7z stat file)
+required_commands=(chdman unzip unrar 7z stat)
 archive_exts=(zip rar 7z 7zip)
 disc_exts=(iso cue gdi ccd)
 all_exts=("${archive_exts[@]}" "${disc_exts[@]}")
@@ -94,6 +94,13 @@ done
 
 chdman_version="$(chdman --help 2>&1 | head -n 1 || true)"
 log "ℹ️ Using $chdman_version"
+# Detect 'createdvd' capability (newer chdman versions)
+CHDMAN_HAS_CREATEDVD=false
+if chdman -help 2>&1 | grep -qiE '(^|[[:space:]])createdvd([[:space:]]|$)'; then
+    CHDMAN_HAS_CREATEDVD=true
+fi
+log "ℹ️ chdman createdvd support: $CHDMAN_HAS_CREATEDVD"
+
 
 total_original_size=0
 total_chd_size=0
@@ -233,29 +240,34 @@ detect_disc_type() {
         cue|ccd|gdi) echo "cd"; return 0 ;;
     esac
 
-    # ISO: sniff filesystem and size heuristics
     if [[ "$ext" == "iso" ]]; then
-        # Prefer 'file' signal for UDF
-        local sig
-        sig="$(file -b -- "$img" 2>/dev/null || true)"
-
-        # If we see UDF, assume DVD
-        if echo "$sig" | grep -qi 'UDF filesystem'; then
-            echo "dvd"; return 0
+        # Prefer 'file' if available
+        if command -v file >/dev/null 2>&1; then
+            local sig
+            sig="$(file -b -- "$img" 2>/dev/null || true)"
+            if echo "$sig" | grep -qi 'UDF filesystem'; then
+                echo "dvd"; return 0
+            fi
+        else
+            # Fallback: sniff for UDF "NSR0[23]" anchor near sector 256
+            local anchor_offset=$((256 * 2048))
+            if dd if="$img" bs=1 skip="$anchor_offset" count=$((64 * 1024)) status=none 2>/dev/null \
+                | grep -aqE 'NSR0(2|3)?'; then
+                echo "dvd"; return 0
+            fi
         fi
 
-        # Fallback: size heuristic (≥ ~1 GB → DVD)
+        # Size heuristic: ≥ ~1 GB → likely DVD; otherwise CD
         local sz
         sz=$(get_file_size "$img")
         if (( sz >= 1000000000 )); then
             echo "dvd"; return 0
         fi
 
-        # Default to CD
         echo "cd"; return 0
     fi
 
-    # Unknown extension → default to CD to be safe with createcd
+    # Unknown extension → default to CD (safe for createcd)
     echo "cd"
 }
 
@@ -263,6 +275,7 @@ convert_disc_file() {
     local file="$1"
     local outdir="$2"
 
+    # If it's a CUE, validate referenced files first
     if [[ "${file,,}" == *.cue ]]; then
         if ! validate_cue_file "$file"; then
             log "❌ Missing referenced file in CUE: $file"
@@ -275,6 +288,7 @@ convert_disc_file() {
     local chd_path="$outdir/$base.chd"
     local tmp_chd="$outdir/$base.chd.tmp"
 
+    # If a CHD already exists, verify it and skip if good
     if [[ -f "$chd_path" ]]; then
         log "🔎 Verifying existing CHD before conversion: $chd_path"
         if verify_chds "$outdir" "$base.chd"; then
@@ -286,19 +300,32 @@ convert_disc_file() {
         fi
     fi
 
-    log "💿 Converting: $file -> $tmp_chd"
+    # Decide CD vs DVD and pick subcommand + icon
     local disc_type
     disc_type="$(detect_disc_type "$file")"
+
+    local subcmd icon
     if [[ "$disc_type" == "dvd" ]]; then
-        log "📀 Detected DVD image → using chdman createdvd"
-        chdman createdvd -i "$file" -o "$tmp_chd" | verify_output_log
+        if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
+            subcmd="createdvd"
+            icon="📀"  # DVD
+        else
+            log "⚠️ Detected DVD image but this chdman lacks 'createdvd'. Skipping: $file"
+            failures=$((failures + 1))
+            return 1
+        fi
     else
-        log "💿 Detected CD image → using chdman createcd"
-        chdman createcd -i "$file" -o "$tmp_chd" | verify_output_log
+        subcmd="createcd"
+        icon="💿"      # CD
     fi
+
+    log "$icon Detected $disc_type image → using chdman $subcmd"
+    log "🔧 Converting: $file -> $tmp_chd"
+    chdman "$subcmd" -i "$file" -o "$tmp_chd" | verify_output_log
 
     return 0
 }
+
 
 process_input() {
     local input_file="$1"
