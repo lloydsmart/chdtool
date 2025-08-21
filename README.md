@@ -61,19 +61,17 @@ Compression complete ... final ratio = 58.7%
 [2025-07-05 14:01:20] 🔤 Normalized base name for M3U: virtua fighter
 [2025-07-05 14:01:20] 🔍 Found 1 CHD candidate, remaining inputs: yes
 [2025-07-05 14:01:20] 🧹 Cleaned up temp dir on exit: /tmp/chdconv_Virtua Fighter (Europe)_a1B2
+[2025-07-05 14:01:20] 🎉 All inputs processed successfully!
 [2025-07-05 14:01:20] 📊 Summary:
 [2025-07-05 14:01:20] 📦 Total original size: 5 GB
 [2025-07-05 14:01:20] 💿 Total CHD size: 4 GB
 [2025-07-05 14:01:20] 📉 Total space saved: 1 GB (23%)
-[2025-07-05 14:01:20] 📦 Archives processed: 15
-[2025-07-05 14:01:20] 💿 CHDs created:       15
+[2025-07-05 14:01:20] 📦 Archives processed: 6
+[2025-07-05 14:01:20] 💿 CHDs created:       6
 [2025-07-05 14:01:20] ❌ Failures:           0
 [2025-07-05 14:01:20] ⏱️ Elapsed time: 55m 56s
 [2025-07-05 14:01:20] ✅ Done!
 
-...
-
-[2025-07-05 14:01:21] 🎉 All inputs processed successfully!
 ```
 
 ---
