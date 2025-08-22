@@ -144,6 +144,11 @@ get_file_size() {
 # Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
 PROGRESS_STYLE_DEFAULT="auto"
 PROGRESS_THROTTLE_MS=150  # reduce flicker
+PROGRESS_BAR_MAX=40        # hard cap so we don't get too wide
+PROGRESS_MARGIN=20         # spare columns to avoid wrap (emoji-width safety)
+PROGRESS_SHOW_RATIO=true   # set to false if you want even shorter lines
+PROGRESS_EMOJI="⏳"
+PROGRESS_EMOJI_COLS=2      # how many terminal columns the emoji takes
 
 # Print N copies of a char
 _repeat_char() { local n=$1 c=$2 out=""; while (( n-- > 0 )); do out+="$c"; done; printf "%s" "$out"; }
@@ -163,38 +168,44 @@ _draw_progress() {
   [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
   [[ -z "$cols" ]] && cols=80
 
-  local left="⏳ $phase ${pct}%"
-  [[ -n "$ratio" ]] && left+=" (ratio=${ratio}%)"
+  # Build the left label (keep it short; emoji is kept)
+  local left="${PROGRESS_EMOJI} ${phase} ${pct}%"
+  if [[ "$PROGRESS_SHOW_RATIO" == true && -n "$ratio" ]]; then
+    left+=" (r=${ratio}%)"   # short tag for ratio to save space
+  fi
 
   if [[ "$style" == "line" ]]; then
-    # Make sure we don't wrap: trim right to terminal width
+    # Clear whole row, then print trimmed to terminal width
     local text="$left"
-    if (( ${#text} > cols-1 )); then text="${text:0:cols-1}"; fi
-    printf "\r%s\033[K" "$text" >&2
+    (( ${#text} > cols-1 )) && text="${text:0:cols-1}"
+    printf "\r\033[2K%s" "$text" >&2
     return 0
   fi
 
-  # bar style
-  local reserved=$(( ${#left} + 4 ))   # space + brackets + space
-  local barw=$(( cols - reserved ))
+  # ----- bar style -----
+  # Conservative width budget:
+  #  reserve = estimated columns taken by 'left' + emoji extra + margin
+  #  (Bash char count underestimates emoji width; add PROGRESS_EMOJI_COLS-1)
+  local left_est=$(( ${#left} + PROGRESS_EMOJI_COLS - 1 ))
+  local reserve=$(( left_est + PROGRESS_MARGIN ))
+
+  # Pick a bar width that fits in the remaining space, capped
+  local barw=$(( cols - reserve ))
+  (( barw > PROGRESS_BAR_MAX )) && barw=$PROGRESS_BAR_MAX
   (( barw < 10 )) && barw=10
-  # Calculate filled cells
-  # pct can be "27.3" -> use integer math by scaling
+
+  # Calculate filled cells from percent
   local scaled
   scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
   (( scaled > barw )) && scaled=$barw
   local filled=$scaled
   local empty=$(( barw - filled ))
+
+  # Build and print (clear whole row first to avoid leftovers)
   local bar
   bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
   local text="$left $bar"
-  if (( ${#text} > cols-1 )); then
-    # If still too long, trim the left part
-    local trim=$(( ${#text} - (cols-1) ))
-    left="${left:0:${#left}-trim}"
-    text="$left $bar"
-  fi
-  printf "\r%s\033[K" "$text" >&2
+  printf "\r\033[2K%s" "$text" >&2
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
