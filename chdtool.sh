@@ -246,7 +246,6 @@ _chdman_progress_filter() {
                 PROGRESS_POS_SAVED=0
             fi
             printf "%s\n" "$line"            # goes to stdout → your logger picks it up
-        fi
     done
 
     # Close at EOF: leave the last progress line and move cursor to next line
