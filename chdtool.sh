@@ -163,8 +163,8 @@ _draw_progress() {
   [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
   [[ -z "$cols" ]] && cols=80
 
-  local left="⏳ $phase ${pct}%%"
-  [[ -n "$ratio" ]] && left+=" (ratio=${ratio}%%)"
+  local left="⏳ $phase ${pct}%"
+  [[ -n "$ratio" ]] && left+=" (ratio=${ratio}%)"
 
   if [[ "$style" == "line" ]]; then
     # Make sure we don't wrap: trim right to terminal width
@@ -201,32 +201,36 @@ _draw_progress() {
 _chdman_progress_filter() {
   local last_draw=0 last_pct="" phase="Compressing" ratio=""
   local now ms
-  while IFS= read -r line; do
-    # If it's a normal diagnostic line, break the progress line and print it
-    if [[ ! "$line" =~ %\ complete ]]; then
-      if [[ -n "$last_pct" ]]; then printf "\n" >&2; last_pct=""; fi
-      printf "%s\n" "$line" >&2
-      continue
-    fi
-    # Extract percent (first match) and optional ratio
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # True progress line
     if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
       local pct="${BASH_REMATCH[1]}"
-      # Try to extract phase (first word before comma), if present
-      if [[ "$line" =~ ^([A-Za-z]+), ]]; then phase="${BASH_REMATCH[1]}"; fi
-      # Extract ratio if present
-      if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; fi
+      [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
+      if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
 
-      # Throttle draws a bit to avoid flicker
       now=$(date +%s%3N 2>/dev/null || date +%s)
-      if [[ "$now" == *s ]]; then ms=$now; else ms=$now; fi
+      ms=$now
       if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
         _draw_progress "$phase" "$pct" "$ratio"
         last_draw=$ms
         last_pct="$pct"
       fi
+      continue
     fi
+
+    # Ignore obvious progress fragments (chopped lines)
+    if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]]; then
+      continue
+    fi
+    if [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
+      continue
+    fi
+
+    # Diagnostics / non-progress: break the progress line and pass to STDOUT
+    if [[ -n "$last_pct" ]]; then printf "\n" >&2; last_pct=""; fi
+    printf "%s\n" "$line"
   done
-  # End: if we drew progress, close the line
+  # Close the progress line at EOF if needed
   [[ -n "$last_pct" ]] && printf "\n" >&2
 }
 
@@ -235,10 +239,10 @@ _chdman_progress_filter() {
 run_chdman_progress() {
   local bin="${CHDMAN_BIN:-chdman}"
   if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-    # Interactive: filter stderr through progress; keep non-progress diagnostics
-    "$bin" "$@" 2> >(_chdman_progress_filter)
+    # Interactive: route BOTH streams through the filter
+    "$bin" "$@" 2>&1 | _chdman_progress_filter
   else
-    # Non-interactive (CI/log files): keep original stderr without spam filtering
+    # Non-interactive: leave as-is (no control chars in logs)
     "$bin" "$@"
   fi
 }
