@@ -175,11 +175,11 @@ _draw_progress() {
     local left="⏳ ${phase} ${pct}%"
     [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
 
-  local text
+    local text
     if [[ "$style" == "line" ]]; then
         text="$left"
     else
-        local margin=${PROGRESS_MARGIN:-20}          # safety to avoid wrap
+        local margin=${PROGRESS_MARGIN:-20}
         local barw=$(( cols - (${#left} + margin) ))
         local cap=${PROGRESS_BAR_MAX:-40}
         (( barw > cap )) && barw=$cap
@@ -188,21 +188,22 @@ _draw_progress() {
         local scaled
         scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
         (( scaled > barw )) && scaled=$barw
-        local filled
-        filled=$scaled
-        local empty
-        empty=$(( barw - filled ))
+
+        # set -u friendly separate assigns
+        local filled; filled=$scaled
+        local empty;  empty=$(( barw - filled ))
+
         text="$left [$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
     fi
 
-    # final clamp so it cannot wrap even with wide glyphs
     (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
 
-    # CR-only redraw: go to column 1, clear line, print — NO newline
+    # CR-only redraw (no newline)
     printf "\r\033[2K%s" "$text" >&2
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
+# --- REPLACE your _chdman_progress_filter with this ---
 _chdman_progress_filter() {
   local last_draw=0 phase="Compressing" ratio="" progress_active=0 now ms
 
@@ -214,29 +215,30 @@ _chdman_progress_filter() {
 
       now=$(date +%s%3N 2>/dev/null || date +%s); ms=$now
       if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
-        _draw_progress "$phase" "$pct" "$ratio"  # no newline
+        # NO newline here—redraw in place only
+        _draw_progress "$phase" "$pct" "$ratio"
         last_draw=$ms
         progress_active=1
       fi
       continue
     fi
 
-    # drop chopped progress fragments
+    # drop chopped progress fragments completely
     if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
        [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
       continue
     fi
 
-    # if we were drawing progress, finish that line once
+    # finishing progress before diagnostics: clear & newline once
     if (( progress_active )); then
-      printf "\n" >&2
+      printf "\r\033[2K\n" >&2
       progress_active=0
     fi
     printf "%s\n" "$line"
   done
 
   # close progress at EOF
-  (( progress_active )) && printf "\n" >&2
+  (( progress_active )) && printf "\r\033[2K\n" >&2
 }
 
 # Wrapper to run chdman with a clean one-line progress display.
