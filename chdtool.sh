@@ -143,9 +143,9 @@ get_file_size() {
 # ---------- chdman progress handling ----------
 # Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
 PROGRESS_STYLE_DEFAULT="auto"
-PROGRESS_THROTTLE_MS=150   # reduce flicker
+PROGRESS_THROTTLE_MS=250   # reduce flicker
 PROGRESS_BAR_MAX=40        # hard cap so we don't get too wide
-PROGRESS_MARGIN=20         # spare columns to avoid wrap (emoji-width safety)
+PROGRESS_MARGIN=28         # spare columns to avoid wrap (emoji-width safety)
 PROGRESS_SHOW_RATIO=true   # set to false if you want even shorter lines
 PROGRESS_EMOJI="⏳"
 PROGRESS_EMOJI_COLS=2      # how many terminal columns the emoji takes
@@ -238,7 +238,6 @@ _chdman_progress_filter() {
 # Wrapper to run chdman with a clean one-line progress display.
 # Usage: run_chdman_progress createcd -i "$in" -o "$out"
 run_chdman_progress() {
-    trap 'printf "\033[?7h" > /dev/tty' INT TERM EXIT
     local last_draw=0 phase="Compressing" ratio="" progress_active=0 now ms
     local bin="${CHDMAN_BIN:-chdman}"
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
