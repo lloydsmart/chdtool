@@ -146,9 +146,6 @@ PROGRESS_STYLE_DEFAULT="auto"
 PROGRESS_THROTTLE_MS=250   # reduce flicker
 PROGRESS_BAR_MAX=40        # hard cap so we don't get too wide
 PROGRESS_MARGIN=28         # spare columns to avoid wrap (emoji-width safety)
-PROGRESS_SHOW_RATIO=true   # set to false if you want even shorter lines
-PROGRESS_EMOJI="⏳"
-PROGRESS_EMOJI_COLS=2      # how many terminal columns the emoji takes
 
 # Print N copies of a char
 _repeat_char() { local n=$1 c=$2 out=""; while (( n-- > 0 )); do out+="$c"; done; printf "%s" "$out"; }
