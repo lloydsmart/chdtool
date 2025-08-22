@@ -174,7 +174,7 @@ _draw_progress() {
     [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
     [[ -z "$cols" ]] && cols=80
 
-    # keep emoji, keep it short
+    # label (keep emoji)
     local left="⏳ ${phase} ${pct}%"
     [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
 
@@ -182,7 +182,6 @@ _draw_progress() {
     if [[ "$style" == "line" ]]; then
         text="$left"
     else
-        # conservative bar; won’t wrap
         local reserve=$(( ${#left} + 8 ))
         local barw=$(( cols - reserve ))
         (( barw > ${PROGRESS_BAR_MAX:-40} )) && barw=${PROGRESS_BAR_MAX:-40}
@@ -196,71 +195,58 @@ _draw_progress() {
         text="$left [$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
     fi
 
-    # final clamp to avoid wrap even with wide glyphs
+    # final clamp against wrap
     (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
 
-    # -------- tput-based redraw (portable) --------
-    if (( PROGRESS_POS_SAVED == 0 )); then
-        # allocate a row, move cursor back up to it, and save that position
-        printf "\n" >&2
-        tput cuu1 >&2          # go up to the new blank line
-        tput sc   >&2          # save cursor position (portable save)
-        PROGRESS_POS_SAVED=1
-    fi
-    tput rc   >&2            # restore saved position
-    tput el   >&2            # clear to end-of-line
-    # draw exactly on the saved row (filter already did rc/el) — NO newline here
+    # draw ONLY the text (no newline, no cursor movement here)
     printf "%s" "$text" >&2
 }
-
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
 _chdman_progress_filter() {
   local last_draw=0 phase="Compressing" ratio="" saved=0 now ms
 
   while IFS= read -r line || [[ -n "$line" ]]; do
-    # Progress lines
     if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
       local pct="${BASH_REMATCH[1]}"
       [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
       if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
 
-      # Allocate a dedicated progress row once and save its position
+      # allocate a single progress row once, and save position
       if (( saved == 0 )); then
-        printf "\n" >&2       # create one blank row
-        tput cuu1 >&2         # go up to it
-        tput sc   >&2         # save position
+        printf "\n" >&2
+        tput cuu1 >&2
+        tput sc   >&2
         saved=1
       fi
 
       now=$(date +%s%3N 2>/dev/null || date +%s); ms=$now
       if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
-        tput rc >&2           # back to saved row
-        tput el >&2           # clear the line
+        tput rc >&2   # restore to progress row
+        tput el >&2   # clear the row
         _draw_progress "$phase" "$pct" "$ratio"  # prints NO newline
         last_draw=$ms
       fi
       continue
     fi
 
-    # Ignore chopped progress fragments entirely
+    # ignore chopped progress fragments
     if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
        [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
       continue
     fi
 
-    # Non-progress diagnostics: finish the progress line cleanly,
-    # then print the diagnostic to stdout (your logger captures it).
+    # diagnostics: finalize progress row once, then print message
     if (( saved )); then
       tput rc >&2
       tput el >&2
-      printf "\n" >&2         # finalize the progress row once
-      tput sc >&2             # re-anchor at this new bottom line
+      printf "\n" >&2
+      saved=0
     fi
     printf "%s\n" "$line"
   done
 
-  # EOF: leave the final progress on screen and move below it
+  # EOF: leave final progress on screen and move below it
   if (( saved )); then
     tput rc >&2
     tput el >&2
