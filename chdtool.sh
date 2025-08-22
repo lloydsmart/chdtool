@@ -162,7 +162,6 @@ _draw_progress() {
   local phase="$1" pct="$2" ratio="$3"
   local style="${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}"
 
-  # auto: bar on TTY, none otherwise
   if [[ "$style" == "auto" ]]; then
     if [[ -t 2 ]]; then style="bar"; else style="none"; fi
   fi
@@ -184,29 +183,25 @@ _draw_progress() {
     local cap=${PROGRESS_BAR_MAX:-40}
     (( barw > cap )) && barw=$cap
     (( barw < 10 )) && barw=10
-
-    # compute filled cells (robust even if awk fails)
-    local scaled
-    scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')" || scaled=0
+    local scaled; scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN{ printf "%.0f",(p/100.0)*w }')" || scaled=0
     [[ -z "$scaled" ]] && scaled=0
+    (( scaled < 0 )) && scaled=0
+    (( scaled > barw )) && scaled=$barw
     local filled=$scaled
-    (( filled < 0 )) && filled=0
-    (( filled > barw )) && filled=$barw
     local empty=$(( barw - filled ))
-
     text="$left [$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
   fi
 
   (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
 
-  # CR + clear; disable wrap for the draw; re-enable; NO newline
+  # CR + clear + draw with autowrap temporarily off; NO newline
   printf "\r\033[2K\033[?7l%s\033[?7h" "$text" > /dev/tty
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
 # --- REPLACE your _chdman_progress_filter with this ---
 _chdman_progress_filter() {
-  # Always re-enable autowrap if we get interrupted or exit
+  # Always re-enable autowrap on exit/interrupt
   trap 'printf "\033[?7h" > /dev/tty' INT TERM EXIT
 
   local last_draw=0 phase="Compressing" ratio="" progress_active=0 now ms
@@ -219,31 +214,26 @@ _chdman_progress_filter() {
 
       now=$(date +%s%3N 2>/dev/null || date +%s); ms=$now
       if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
-        _draw_progress "$phase" "$pct" "$ratio"  # draw in place (no newline)
+        _draw_progress "$phase" "$pct" "$ratio"
         last_draw=$ms
         progress_active=1
       fi
       continue
     fi
 
-    # Ignore chopped progress fragments entirely
+    # Ignore obvious chopped progress fragments
     if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
        [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
       continue
     fi
 
-    # For diagnostics: finish the progress line cleanly, then print
-    if (( progress_active )); then
-      printf "\r\033[2K\n" > /dev/tty
-      progress_active=0
-    fi
-    printf "%s\n" "$line"
+    # Send diagnostics directly to the logfile (NO terminal output, NO newline to TTY)
+    printf "[%s] %s\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$line" >> "$LOGFILE"
   done
 
-  # EOF: leave the last progress nicely terminated
+  # At EOF: end the progress line neatly with a single newline
   (( progress_active )) && printf "\r\033[2K\n" > /dev/tty
 }
-
 
 # Wrapper to run chdman with a clean one-line progress display.
 # Usage: run_chdman_progress createcd -i "$in" -o "$out"
@@ -543,7 +533,7 @@ convert_disc_file() {
 
     log "$icon Detected $disc_type image → using chdman $subcmd"
     log "🔧 Converting: $file -> $tmp_chd"
-    if ! run_chdman_progress "$subcmd" -i "$file" -o "$tmp_chd" | verify_output_log; then
+    if ! run_chdman_progress "$subcmd" -i "$file" -o "$tmp_chd"; then
         log "❌ chdman $subcmd failed for: $file"
     return 1
     fi
