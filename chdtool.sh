@@ -199,7 +199,7 @@ _draw_progress() {
     (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
 
     # CR-only redraw (no newline)
-    printf "\r\033[2K%s" "$text" >&2
+    printf "\r\033[2K%s" "$text" > /dev/tty
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
@@ -231,14 +231,14 @@ _chdman_progress_filter() {
 
     # finishing progress before diagnostics: clear & newline once
     if (( progress_active )); then
-      printf "\r\033[2K\n" >&2
+      printf "\r\033[2K\n" > /dev/tty
       progress_active=0
     fi
     printf "%s\n" "$line"
   done
 
   # close progress at EOF
-  (( progress_active )) && printf "\r\033[2K\n" >&2
+  (( progress_active )) && printf "\r\033[2K\n" > /dev/tty
 }
 
 # Wrapper to run chdman with a clean one-line progress display.
