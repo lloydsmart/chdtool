@@ -205,51 +205,54 @@ _draw_progress() {
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
 # --- REPLACE your _chdman_progress_filter with this ---
 _chdman_progress_filter() {
-  local last_draw=0 phase="Compressing" ratio="" progress_active=0 now ms
+    local last_draw=0 phase="Compressing" ratio="" progress_active=0 now ms
 
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
-      local pct="${BASH_REMATCH[1]}"
-      [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
-      if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
+            local pct="${BASH_REMATCH[1]}"
+            [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
+            if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
+            now=$(date +%s%3N 2>/dev/null || date +%s); ms=$now
+            if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
+                # NO newline here—redraw in place only
+                _draw_progress "$phase" "$pct" "$ratio"
+                last_draw=$ms
+                progress_active=1
+            fi
+            continue
+        fi
 
-      now=$(date +%s%3N 2>/dev/null || date +%s); ms=$now
-      if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
-        # NO newline here—redraw in place only
-        _draw_progress "$phase" "$pct" "$ratio"
-        last_draw=$ms
-        progress_active=1
-      fi
-      continue
-    fi
+        # drop chopped progress fragments completely
+        if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
+            [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
+            continue
+        fi
 
-    # drop chopped progress fragments completely
-    if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
-       [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
-      continue
-    fi
+        # finishing progress before diagnostics: clear & newline once
+        if (( progress_active )); then
+            printf "\r\033[2K\n" > /dev/tty
+            progress_active=0
+        fi
 
-    # finishing progress before diagnostics: clear & newline once
-    if (( progress_active )); then
-      printf "\r\033[2K\n" > /dev/tty
-      progress_active=0
-    fi
-    printf "%s\n" "$line"
-  done
+        (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
 
-  # close progress at EOF
-  (( progress_active )) && printf "\r\033[2K\n" > /dev/tty
+        # Draw directly to the TTY, with wrap disabled so it never spills to next line
+        # \r = CR to start of line, \033[2K = clear line, \033[?7l = disable wrap, \033[?7h = enable wrap
+        printf "\r\033[2K\033[?7l%s\033[?7h" "$text" > /dev/tty
+    done
 }
 
 # Wrapper to run chdman with a clean one-line progress display.
 # Usage: run_chdman_progress createcd -i "$in" -o "$out"
 run_chdman_progress() {
-  local bin="${CHDMAN_BIN:-chdman}"
-  if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-    "$bin" "$@" 2>&1 | _chdman_progress_filter
-  else
-    "$bin" "$@"
-  fi
+    trap 'printf "\033[?7h" > /dev/tty' INT TERM EXIT
+    local last_draw=0 phase="Compressing" ratio="" progress_active=0 now ms
+    local bin="${CHDMAN_BIN:-chdman}"
+    if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
+        "$bin" "$@" 2>&1 | _chdman_progress_filter
+    else
+        "$bin" "$@"
+    fi
 }
 # ---------- end chdman progress ----------
 
