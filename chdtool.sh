@@ -161,91 +161,102 @@ PROGRESS_BAR_MAX=${PROGRESS_BAR_MAX:-40}
 PROGRESS_FUDGE=${PROGRESS_FUDGE:-8}   # extra safety to prevent wrap with wide glyphs
 
 _draw_progress() {
-  local phase="$1" pct="$2" ratio="$3"
-  local style="${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}"
+    local phase="$1" pct="$2" ratio="$3"
+    local style="${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}"
 
-  # auto: choose bar if interactive TTY, else none
-  if [[ "$style" == "auto" ]]; then
-    if [[ -t 2 ]]; then style="bar"; else style="none"; fi
-  fi
-  [[ "$style" == "none" ]] && return 0
+    # auto: choose bar if interactive TTY, else none
+    if [[ "$style" == "auto" ]]; then
+        if [[ -t 2 ]]; then style="bar"; else style="none"; fi
+    fi
+    [[ "$style" == "none" ]] && return 0
 
-  local cols="${COLUMNS:-}"
-  [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
-  [[ -z "$cols" ]] && cols=80
+    local cols="${COLUMNS:-}"
+    [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
+    [[ -z "$cols" ]] && cols=80
 
-  # keep emoji, keep it short
-  local left="⏳ ${phase} ${pct}%"
-  [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
+    # keep emoji, keep it short
+    local left="⏳ ${phase} ${pct}%"
+    [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
 
-  local text
-  if [[ "$style" == "line" ]]; then
-    text="$left"
-  else
-    # conservative bar; won’t wrap
-    local reserve=$(( ${#left} + 8 ))
-    local barw=$(( cols - reserve ))
-    (( barw > ${PROGRESS_BAR_MAX:-40} )) && barw=${PROGRESS_BAR_MAX:-40}
-    (( barw < 10 )) && barw=10
+    local text
+    if [[ "$style" == "line" ]]; then
+        text="$left"
+    else
+        # conservative bar; won’t wrap
+        local reserve=$(( ${#left} + 8 ))
+        local barw=$(( cols - reserve ))
+        (( barw > ${PROGRESS_BAR_MAX:-40} )) && barw=${PROGRESS_BAR_MAX:-40}
+        (( barw < 10 )) && barw=10
 
-    local scaled
-    scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
-    (( scaled > barw )) && scaled=$barw
-    local filled=$scaled
-    local empty=$(( barw - filled ))
-    text="$left [$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
-  fi
+        local scaled
+        scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
+        (( scaled > barw )) && scaled=$barw
+        local filled=$scaled
+        local empty=$(( barw - filled ))
+        text="$left [$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
+    fi
 
-  # final clamp to avoid wrap even with wide glyphs
-  (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
+    # final clamp to avoid wrap even with wide glyphs
+    (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
 
-  # draw exactly on the saved row: restore → clear line → print (no newline)
-  printf "\033[u\033[2K%s" "$text" >&2
+    # -------- tput-based redraw (portable) --------
+    if (( PROGRESS_POS_SAVED == 0 )); then
+        # allocate a row, move cursor back up to it, and save that position
+        printf "\n" >&2
+        tput cuu1 >&2          # go up to the new blank line
+        tput sc   >&2          # save cursor position (portable save)
+        PROGRESS_POS_SAVED=1
+    fi
+    tput rc   >&2            # restore saved position
+    tput el   >&2            # clear to end-of-line
+    printf "%s" "$text" >&2  # draw progress (NO newline)
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
 _chdman_progress_filter() {
-  local last_draw=0 last_pct="" phase="Compressing" ratio=""
-  local progress_seen=0 now ms
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
-      local pct="${BASH_REMATCH[1]}"
-      [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
-      if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
+    local last_draw=0 last_pct="" phase="Compressing" ratio=""
+    local progress_seen=0 now ms
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
+            local pct="${BASH_REMATCH[1]}"
+            [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
+            if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
+                # Allocate a dedicated row and SAVE cursor pos once
+                if (( PROGRESS_POS_SAVED == 0 )); then
+                    printf "\n\033[s" >&2     # newline to create the row, then save position
+                    PROGRESS_POS_SAVED=1
+                fi
+                now=$(date +%s%3N 2>/dev/null || date +%s); ms=$now
+                if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
+                    _draw_progress "$phase" "$pct" "$ratio"
+                    last_draw=$ms; last_pct="$pct"; progress_seen=1
+                fi
+                continue
+            fi
 
-      # Allocate a dedicated row and SAVE cursor pos once
-      if (( PROGRESS_POS_SAVED == 0 )); then
-        printf "\n\033[s" >&2     # newline to create the row, then save position
-        PROGRESS_POS_SAVED=1
-      fi
+            # ignore chopped progress fragments
+            if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
+                [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
+                continue
+            fi
 
-      now=$(date +%s%3N 2>/dev/null || date +%s); ms=$now
-      if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
-        _draw_progress "$phase" "$pct" "$ratio"
-        last_draw=$ms; last_pct="$pct"; progress_seen=1
-      fi
-      continue
-    fi
+            # For diagnostics: finish the progress row cleanly, then print the message
+            if (( PROGRESS_POS_SAVED )); then
+                printf "\033[u\033[2K\n" >&2   # clear progress row and move to next line
+                PROGRESS_POS_SAVED=0
+            fi
+            printf "%s\n" "$line"            # goes to stdout → your logger picks it up
+        fi
+    done
 
-    # ignore chopped progress fragments
-    if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
-       [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
-      continue
-    fi
-
-    # For diagnostics: finish the progress row cleanly, then print the message
+    # Close at EOF: leave the last progress line and move cursor to next line
     if (( PROGRESS_POS_SAVED )); then
-      printf "\033[u\033[2K\n" >&2   # clear progress row and move to next line
-      PROGRESS_POS_SAVED=0
+        # move to start of saved row, clear it, then print the final progress with a newline
+        tput rc >&2
+        tput el >&2
+        printf "%s\n" "" >&2
+        PROGRESS_POS_SAVED=0
     fi
-    printf "%s\n" "$line"            # goes to stdout → your logger picks it up
-  done
-
-  # Close at EOF: leave the last progress line and move cursor to next line
-  if (( PROGRESS_POS_SAVED )); then
-    printf "\n" >&2
-    PROGRESS_POS_SAVED=0
-  fi
 }
 
 # Wrapper to run chdman with a clean one-line progress display.
