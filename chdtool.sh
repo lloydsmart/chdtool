@@ -205,7 +205,7 @@ _chdman_progress_filter() {
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
-      local pct="${BASHREMATCH[1]}"
+      local pct="${BASH_REMATCH[1]}"
       [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
       if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
 
@@ -532,11 +532,13 @@ convert_disc_file() {
 
     log "$icon Detected $disc_type image → using chdman $subcmd"
     log "🔧 Converting: $file -> $tmp_chd"
-    run_chdman_progress "$subcmd" -i "$file" -o "$tmp_chd" | verify_output_log
+    if ! run_chdman_progress "$subcmd" -i "$file" -o "$tmp_chd" | verify_output_log; then
+        log "❌ chdman $subcmd failed for: $file"
+    return 1
+    fi
 
     return 0
 }
-
 
 process_input() {
     local input_file="$1"
