@@ -256,29 +256,31 @@ trim() {
 
 # Parse disc info from a base name (no extension).
 # On success, echoes "<base>|<disc_num>" and returns 0; else returns 1.
-# On success, echoes "<base>|<disc_num>"
 parse_disc_info() {
     local name="$1"
 
-    # A) "... (Disc 2)" / "... CD3" / "... Disk 1" / "... GD-ROM 2" (case-insensitive)
-    # NOTE: bash uses ERE — no non-greedy and no (?:...)
-    local re_a='^(.*)[[:space:]._-]*\(?([Dd][Ii][Ss][Cc]|[Cc][Dd]|[Dd][Ii][Ss][Kk]|[Gg][Dd](-[Rr][Oo][Mm])?)[[:space:]]*([0-9]+)\)?([[:space:]]*.*)?$'
+    # A) "... (Disc 2)" / "... CD3" / "... Disk 1" / "... GD-ROM 2"
+    # Ensure base ends with a non-separator char to avoid trailing " ("
+    local re_a='^(.+[^[:space:]._-])[[:space:]._-]*\(?([Dd][Ii][Ss][Cc]|[Cc][Dd]|[Dd][Ii][Ss][Kk]|[Gg][Dd](-[Rr][Oo][Mm])?)[[:space:]]*([0-9]+)\)?([[:space:]]*.*)?$'
 
     # B) "... (1 of 2)" / "... 1 of 2" / "... 1/2"
-    local re_b='^(.*)[[:space:]._-]*\(?([0-9]+)[[:space:]]*(of|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$'
+    local re_b='^(.+[^[:space:]._-])[[:space:]._-]*\(?([0-9]+)[[:space:]]*(of|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$'
 
     if [[ "$name" =~ $re_a ]]; then
-        # Groups: 1=base, 2=label, 3=optional "-ROM", 4=disc number
         local base="${BASH_REMATCH[1]}"
         local num="${BASH_REMATCH[4]}"
+        base="$(trim "$base")"
+        # Defensive: remove a dangling opener if one somehow snuck in
+        base="${base% \(}"; base="${base% \[}"; base="${base% \{}"
         base="$(trim "$base")"
         [[ -n "$base" && -n "$num" ]] && { printf '%s|%s\n' "$base" "$num"; return 0; }
     fi
 
     if [[ "$name" =~ $re_b ]]; then
-        # Groups: 1=base, 2=disc number
         local base="${BASH_REMATCH[1]}"
         local num="${BASH_REMATCH[2]}"
+        base="$(trim "$base")"
+        base="${base% \(}"; base="${base% \[}"; base="${base% \{}"
         base="$(trim "$base")"
         [[ -n "$base" && -n "$num" ]] && { printf '%s|%s\n' "$base" "$num"; return 0; }
     fi
