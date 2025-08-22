@@ -143,12 +143,13 @@ get_file_size() {
 # ---------- chdman progress handling ----------
 # Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
 PROGRESS_STYLE_DEFAULT="auto"
-PROGRESS_THROTTLE_MS=150  # reduce flicker
+PROGRESS_THROTTLE_MS=150   # reduce flicker
 PROGRESS_BAR_MAX=40        # hard cap so we don't get too wide
 PROGRESS_MARGIN=20         # spare columns to avoid wrap (emoji-width safety)
 PROGRESS_SHOW_RATIO=true   # set to false if you want even shorter lines
 PROGRESS_EMOJI="⏳"
 PROGRESS_EMOJI_COLS=2      # how many terminal columns the emoji takes
+PROGRESS_ROW_ALLOCATED=0   # internal: have we placed a progress row yet?
 
 # Print N copies of a char
 _repeat_char() { local n=$1 c=$2 out=""; while (( n-- > 0 )); do out+="$c"; done; printf "%s" "$out"; }
@@ -168,44 +169,43 @@ _draw_progress() {
   [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
   [[ -z "$cols" ]] && cols=80
 
-  # Build the left label (keep it short; emoji is kept)
-  local left="${PROGRESS_EMOJI} ${phase} ${pct}%"
-  if [[ "$PROGRESS_SHOW_RATIO" == true && -n "$ratio" ]]; then
-    left+=" (r=${ratio}%)"   # short tag for ratio to save space
-  fi
+  # Build the left label (kept short; emoji preserved)
+  local left="⏳ ${phase} ${pct}%"
+  [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
 
+  # ----- choose content to print -----
+  local text
   if [[ "$style" == "line" ]]; then
-    # Clear whole row, then print trimmed to terminal width
-    local text="$left"
+    text="$left"
     (( ${#text} > cols-1 )) && text="${text:0:cols-1}"
-    printf "\033[1G\033[2K%s" "$text" >&2
-    return 0
+  else
+    # bar style
+    local reserved=$(( ${#left} + 20 ))  # conservative margin to avoid wrap
+    local barw=$(( cols - reserved ))
+    (( barw > 40 )) && barw=40
+    (( barw < 10 )) && barw=10
+
+    local scaled
+    scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
+    (( scaled > barw )) && scaled=$barw
+    local filled=$scaled
+    local empty=$(( barw - filled ))
+    local bar
+    bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
+    text="$left $bar"
   fi
 
-  # ----- bar style -----
-  # Conservative width budget:
-  #  reserve = estimated columns taken by 'left' + emoji extra + margin
-  #  (Bash char count underestimates emoji width; add PROGRESS_EMOJI_COLS-1)
-  local left_est=$(( ${#left} + PROGRESS_EMOJI_COLS - 1 ))
-  local reserve=$(( left_est + PROGRESS_MARGIN ))
-
-  # Pick a bar width that fits in the remaining space, capped
-  local barw=$(( cols - reserve ))
-  (( barw > PROGRESS_BAR_MAX )) && barw=$PROGRESS_BAR_MAX
-  (( barw < 10 )) && barw=10
-
-  # Calculate filled cells from percent
-  local scaled
-  scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
-  (( scaled > barw )) && scaled=$barw
-  local filled=$scaled
-  local empty=$(( barw - filled ))
-
-  # Build and print (clear whole row first to avoid leftovers)
-  local bar
-  bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
-  local text="$left $bar"
-  printf "\033[1G\033[2K%s" "$text" >&2
+  # ----- robust redraw: always draw on the SAME row -----
+  # First time: allocate a dedicated row by printing a blank newline.
+  if (( PROGRESS_ROW_ALLOCATED == 0 )); then
+    printf "\n" >&2          # allocate a row below current output
+    PROGRESS_ROW_ALLOCATED=1
+  else
+    printf "\033[1A" >&2     # move cursor UP one line to the progress row
+  fi
+  # Clear the entire line, print the fresh content, and end with newline so
+  # the next update can move back up to overwrite this same row.
+  printf "\033[2K%s\n" "$text" >&2
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
@@ -243,6 +243,8 @@ _chdman_progress_filter() {
   done
   # Close the progress line at EOF if needed
   [[ -n "$last_pct" ]] && printf "\n" >&2
+
+  PROGRESS_ROW_ALLOCATED=0
 }
 
 # Wrapper to run chdman with a clean one-line progress display.
