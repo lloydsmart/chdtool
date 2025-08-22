@@ -159,44 +159,47 @@ PROGRESS_BAR_MAX=${PROGRESS_BAR_MAX:-40}
 PROGRESS_FUDGE=${PROGRESS_FUDGE:-8}   # extra safety to prevent wrap with wide glyphs
 
 _draw_progress() {
-  local phase="$1" pct="$2" ratio="$3"
-  local style="${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}"
+    local phase="$1" pct="$2" ratio="$3"
+    local style="${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}"
 
-  # auto: bar on TTY, none otherwise
-  if [[ "$style" == "auto" ]]; then
-    if [[ -t 2 ]]; then style="bar"; else style="none"; fi
-  fi
-  [[ "$style" == "none" ]] && return 0
+    # auto: bar on TTY, none otherwise
+    if [[ "$style" == "auto" ]]; then
+        if [[ -t 2 ]]; then style="bar"; else style="none"; fi
+    fi
+    [[ "$style" == "none" ]] && return 0
 
-  local cols="${COLUMNS:-}"
-  [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
-  [[ -z "$cols" ]] && cols=80
+    local cols="${COLUMNS:-}"
+    [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
+    [[ -z "$cols" ]] && cols=80
 
-  local left="⏳ ${phase} ${pct}%"
-  [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
+    local left="⏳ ${phase} ${pct}%"
+    [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
 
   local text
-  if [[ "$style" == "line" ]]; then
-    text="$left"
-  else
-    local margin=${PROGRESS_MARGIN:-20}          # safety to avoid wrap
-    local barw=$(( cols - (${#left} + margin) ))
-    local cap=${PROGRESS_BAR_MAX:-40}
-    (( barw > cap )) && barw=$cap
-    (( barw < 10 )) && barw=10
+    if [[ "$style" == "line" ]]; then
+        text="$left"
+    else
+        local margin=${PROGRESS_MARGIN:-20}          # safety to avoid wrap
+        local barw=$(( cols - (${#left} + margin) ))
+        local cap=${PROGRESS_BAR_MAX:-40}
+        (( barw > cap )) && barw=$cap
+        (( barw < 10 )) && barw=10
 
-    local scaled
-    scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
-    (( scaled > barw )) && scaled=$barw
-    local filled=$scaled empty=$(( barw - filled ))
-    text="$left [$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
-  fi
+        local scaled
+        scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN { printf "%.0f", (p/100.0)*w }')"
+        (( scaled > barw )) && scaled=$barw
+        local filled
+        filled=$scaled
+        local empty
+        empty=$(( barw - filled ))
+        text="$left [$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
+    fi
 
-  # final clamp so it cannot wrap even with wide glyphs
-  (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
+    # final clamp so it cannot wrap even with wide glyphs
+    (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
 
-  # CR-only redraw: go to column 1, clear line, print — NO newline
-  printf "\r\033[2K%s" "$text" >&2
+    # CR-only redraw: go to column 1, clear line, print — NO newline
+    printf "\r\033[2K%s" "$text" >&2
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
