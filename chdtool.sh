@@ -150,6 +150,7 @@ PROGRESS_SHOW_RATIO=true   # set to false if you want even shorter lines
 PROGRESS_EMOJI="⏳"
 PROGRESS_EMOJI_COLS=2      # how many terminal columns the emoji takes
 PROGRESS_ROW_ALLOCATED=0   # internal: have we placed a progress row yet?
+PROGRESS_POS_SAVED=0      # internal: have we saved a cursor spot for progress?
 
 # Print N copies of a char
 _repeat_char() { local n=$1 c=$2 out=""; while (( n-- > 0 )); do out+="$c"; done; printf "%s" "$out"; }
@@ -173,7 +174,7 @@ _draw_progress() {
   [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
   [[ -z "$cols" ]] && cols=80
 
-  # Keep the emoji + short label
+  # keep emoji, keep it short
   local left="⏳ ${phase} ${pct}%"
   [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
 
@@ -181,10 +182,10 @@ _draw_progress() {
   if [[ "$style" == "line" ]]; then
     text="$left"
   else
-    # Conservative bar width that *cannot* wrap. FUDGE reserves space for emoji width etc.
-    local reserve=$(( ${#left} + PROGRESS_FUDGE ))
+    # conservative bar; won’t wrap
+    local reserve=$(( ${#left} + 8 ))
     local barw=$(( cols - reserve ))
-    (( barw > PROGRESS_BAR_MAX )) && barw=$PROGRESS_BAR_MAX
+    (( barw > ${PROGRESS_BAR_MAX:-40} )) && barw=${PROGRESS_BAR_MAX:-40}
     (( barw < 10 )) && barw=10
 
     local scaled
@@ -192,55 +193,59 @@ _draw_progress() {
     (( scaled > barw )) && scaled=$barw
     local filled=$scaled
     local empty=$(( barw - filled ))
-    local bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
-    text="$left $bar"
+    text="$left [$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
   fi
 
-  # Final clamp: never let it exceed terminal width (prevents wrap for any odd case)
-  if (( ${#text} > cols-2 )); then
-    text="${text:0:cols-2}"
-  fi
+  # final clamp to avoid wrap even with wide glyphs
+  (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
 
-  # Draw in-place, no newline, no carriage return
-  printf "\033[1G\033[2K%s" "$text" >&2
+  # draw exactly on the saved row: restore → clear line → print (no newline)
+  printf "\033[u\033[2K%s" "$text" >&2
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
 _chdman_progress_filter() {
   local last_draw=0 last_pct="" phase="Compressing" ratio=""
-  local progress_active=0 now ms
+  local progress_seen=0 now ms
   while IFS= read -r line || [[ -n "$line" ]]; do
-    # True progress line
     if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
       local pct="${BASH_REMATCH[1]}"
       [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
       if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
 
+      # Allocate a dedicated row and SAVE cursor pos once
+      if (( PROGRESS_POS_SAVED == 0 )); then
+        printf "\n\033[s" >&2     # newline to create the row, then save position
+        PROGRESS_POS_SAVED=1
+      fi
+
       now=$(date +%s%3N 2>/dev/null || date +%s); ms=$now
       if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
         _draw_progress "$phase" "$pct" "$ratio"
-        last_draw=$ms; last_pct="$pct"; progress_active=1
+        last_draw=$ms; last_pct="$pct"; progress_seen=1
       fi
       continue
     fi
 
-    # Ignore obvious chopped progress fragments
+    # ignore chopped progress fragments
     if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
        [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
       continue
     fi
 
-    # Diagnostics/non-progress: finish the progress line first (one newline),
-    # then print the message on its own line (stdout so your logger sees it).
-    if (( progress_active )); then
-      printf "\n" >&2
-      progress_active=0
+    # For diagnostics: finish the progress row cleanly, then print the message
+    if (( PROGRESS_POS_SAVED )); then
+      printf "\033[u\033[2K\n" >&2   # clear progress row and move to next line
+      PROGRESS_POS_SAVED=0
     fi
-    printf "%s\n" "$line"
+    printf "%s\n" "$line"            # goes to stdout → your logger picks it up
   done
 
-  # Close the progress line at EOF if it was active
-  (( progress_active )) && printf "\n" >&2
+  # Close at EOF: leave the last progress line and move cursor to next line
+  if (( PROGRESS_POS_SAVED )); then
+    printf "\n" >&2
+    PROGRESS_POS_SAVED=0
+  fi
 }
 
 # Wrapper to run chdman with a clean one-line progress display.
@@ -248,10 +253,8 @@ _chdman_progress_filter() {
 run_chdman_progress() {
   local bin="${CHDMAN_BIN:-chdman}"
   if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-    # Interactive: route BOTH streams through the filter
     "$bin" "$@" 2>&1 | _chdman_progress_filter
   else
-    # Non-interactive: leave as-is (no control chars in logs)
     "$bin" "$@"
   fi
 }
