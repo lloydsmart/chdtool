@@ -178,7 +178,7 @@ _draw_progress() {
     # Clear whole row, then print trimmed to terminal width
     local text="$left"
     (( ${#text} > cols-1 )) && text="${text:0:cols-1}"
-    printf "\r\033[2K%s" "$text" >&2
+    printf "\033[1G\033[2K%s" "$text" >&2
     return 0
   fi
 
@@ -205,7 +205,7 @@ _draw_progress() {
   local bar
   bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
   local text="$left $bar"
-  printf "\r\033[2K%s" "$text" >&2
+  printf "\033[1G\033[2K%s" "$text" >&2
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
