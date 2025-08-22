@@ -155,6 +155,10 @@ PROGRESS_ROW_ALLOCATED=0   # internal: have we placed a progress row yet?
 _repeat_char() { local n=$1 c=$2 out=""; while (( n-- > 0 )); do out+="$c"; done; printf "%s" "$out"; }
 
 # Draw a single-line status (bar or line) to stderr, staying on one row.
+# Put these near your config if you want (tweakable)
+PROGRESS_BAR_MAX=${PROGRESS_BAR_MAX:-40}
+PROGRESS_FUDGE=${PROGRESS_FUDGE:-8}   # extra safety to prevent wrap with wide glyphs
+
 _draw_progress() {
   local phase="$1" pct="$2" ratio="$3"
   local style="${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}"
@@ -169,20 +173,18 @@ _draw_progress() {
   [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
   [[ -z "$cols" ]] && cols=80
 
-  # Build the left label (kept short; emoji preserved)
+  # Keep the emoji + short label
   local left="⏳ ${phase} ${pct}%"
   [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
 
-  # ----- choose content to print -----
   local text
   if [[ "$style" == "line" ]]; then
     text="$left"
-    (( ${#text} > cols-1 )) && text="${text:0:cols-1}"
   else
-    # bar style
-    local reserved=$(( ${#left} + 20 ))  # conservative margin to avoid wrap
-    local barw=$(( cols - reserved ))
-    (( barw > 40 )) && barw=40
+    # Conservative bar width that *cannot* wrap. FUDGE reserves space for emoji width etc.
+    local reserve=$(( ${#left} + PROGRESS_FUDGE ))
+    local barw=$(( cols - reserve ))
+    (( barw > PROGRESS_BAR_MAX )) && barw=$PROGRESS_BAR_MAX
     (( barw < 10 )) && barw=10
 
     local scaled
@@ -190,28 +192,23 @@ _draw_progress() {
     (( scaled > barw )) && scaled=$barw
     local filled=$scaled
     local empty=$(( barw - filled ))
-    local bar
-    bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
+    local bar="[$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
     text="$left $bar"
   fi
 
-  # ----- robust redraw: always draw on the SAME row -----
-  # First time: allocate a dedicated row by printing a blank newline.
-  if (( PROGRESS_ROW_ALLOCATED == 0 )); then
-    printf "\n" >&2          # allocate a row below current output
-    PROGRESS_ROW_ALLOCATED=1
-  else
-    printf "\033[1A" >&2     # move cursor UP one line to the progress row
+  # Final clamp: never let it exceed terminal width (prevents wrap for any odd case)
+  if (( ${#text} > cols-2 )); then
+    text="${text:0:cols-2}"
   fi
-  # Clear the entire line, print the fresh content, and end with newline so
-  # the next update can move back up to overwrite this same row.
-  printf "\033[2K%s\n" "$text" >&2
+
+  # Draw in-place, no newline, no carriage return
+  printf "\033[1G\033[2K%s" "$text" >&2
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
 _chdman_progress_filter() {
   local last_draw=0 last_pct="" phase="Compressing" ratio=""
-  local now ms
+  local progress_active=0 now ms
   while IFS= read -r line || [[ -n "$line" ]]; do
     # True progress line
     if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
@@ -219,32 +216,31 @@ _chdman_progress_filter() {
       [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
       if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
 
-      now=$(date +%s%3N 2>/dev/null || date +%s)
-      ms=$now
+      now=$(date +%s%3N 2>/dev/null || date +%s); ms=$now
       if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
         _draw_progress "$phase" "$pct" "$ratio"
-        last_draw=$ms
-        last_pct="$pct"
+        last_draw=$ms; last_pct="$pct"; progress_active=1
       fi
       continue
     fi
 
-    # Ignore obvious progress fragments (chopped lines)
-    if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]]; then
-      continue
-    fi
-    if [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
+    # Ignore obvious chopped progress fragments
+    if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
+       [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
       continue
     fi
 
-    # Diagnostics / non-progress: break the progress line and pass to STDOUT
-    if [[ -n "$last_pct" ]]; then printf "\n" >&2; last_pct=""; fi
+    # Diagnostics/non-progress: finish the progress line first (one newline),
+    # then print the message on its own line (stdout so your logger sees it).
+    if (( progress_active )); then
+      printf "\n" >&2
+      progress_active=0
+    fi
     printf "%s\n" "$line"
   done
-  # Close the progress line at EOF if needed
-  [[ -n "$last_pct" ]] && printf "\n" >&2
 
-  PROGRESS_ROW_ALLOCATED=0
+  # Close the progress line at EOF if it was active
+  (( progress_active )) && printf "\n" >&2
 }
 
 # Wrapper to run chdman with a clean one-line progress display.
