@@ -254,38 +254,102 @@ trim() {
     printf "%s" "$s"
 }
 
+# --- helpers for robust parsing ---
+normalize_for_parse() {
+  # Normalize to make matching easier (full-width → ASCII, unify spaces/dashes)
+  local s="$*"
+  if command -v perl >/dev/null 2>&1; then
+    s="$(printf '%s' "$s" | perl -CS -Mutf8 -pe '
+      # full-width digits → ASCII
+      tr/\x{FF10}-\x{FF19}/0-9/;
+      # full-width parens/brackets → ASCII
+      tr/\x{FF08}\x{FF09}/()/;     # （ ）
+      tr/\x{FF3B}\x{FF3D}/[]/;     # ［ ］
+      # ideographic space → normal space
+      tr/\x{3000}/ /;
+      # unify dashes to ASCII hyphen
+      s/[-–—−―]/-/g;
+    ')"
+  fi
+  printf '%s' "$s"
+}
+
+tidy_base() {
+  # Trim + drop lingering separators/brackets at the end
+  local s="$*"
+  s="$(trim "$s")"
+  if command -v perl >/dev/null 2>&1; then
+    s="$(printf '%s' "$s" | perl -CS -Mutf8 -pe 's/[ \t._-]*[([{（［｛]*\s*$//')"
+  else
+    s="$(printf '%s' "$s" | sed -E 's/[[:space:]._-]*[\(\[\{]+[[:space:]]*$//')"
+  fi
+  printf '%s' "$s"
+}
+
+letter_to_num() {
+  # A→1, B→2, … Z→26
+  local L="${1:-}"
+  [[ -z "$L" ]] && { echo ""; return 1; }
+  L="${L^^}"
+  printf '%d\n' $(( $(printf '%d' "'${L:0:1}") - 64 ))
+}
+
 # Parse disc info from a base name (no extension).
 # On success, echoes "<base>|<disc_num>" and returns 0; else returns 1.
 parse_disc_info() {
-    local name="$1"
+  local name="$1"
+  local name_norm; name_norm="$(normalize_for_parse "$name")"
 
-    # A) "... (Disc 2)" / "... CD3" / "... Disk 1" / "... GD-ROM 2"
-    # Ensure base ends with a non-separator char to avoid trailing " ("
-    local re_a='^(.+[^[:space:]._-])[[:space:]._-]*\(?([Dd][Ii][Ss][Cc]|[Cc][Dd]|[Dd][Ii][Ss][Kk]|[Gg][Dd](-[Rr][Oo][Mm])?)[[:space:]]*([0-9]+)\)?([[:space:]]*.*)?$'
+  # Pattern set 1: Disc/CD/Disk/GD(-ROM)? with optional separator or none:
+  # e.g., "Title Disc2", "Title (CD-2)", "Title [Disk02]", "Title GD-ROM 3", "Title Disc 01"
+  local re_core='([Dd]isc|[Cc][Dd]|[Dd]isk|[Gg][Dd](?:-[Rr][Oo][Mm])?)'
+  local re_num='([0-9]{1,3})'
+  local re_sep='[[:space:]]*[-_\.]?[[:space:]]*'
 
-    # B) "... (1 of 2)" / "... 1 of 2" / "... 1/2"
-    local re_b='^(.+[^[:space:]._-])[[:space:]._-]*\(?([0-9]+)[[:space:]]*(of|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$'
+  if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?$re_core$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
+    local base="${BASH_REMATCH[1]}"
+    local num="${BASH_REMATCH[3]}"   # (1=label,2=sep? depends on grouping; ensure index)
+    # Because of our grouping above, indexes are:
+    # 1=prefix, 2=label, 3=number, 4=tail
+    base="$(tidy_base "$base")"
+    [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
+  fi
 
-    if [[ "$name" =~ $re_a ]]; then
-        local base="${BASH_REMATCH[1]}"
-        local num="${BASH_REMATCH[4]}"
-        base="$(trim "$base")"
-        # Defensive: remove a dangling opener if one somehow snuck in
-        base="${base% \(}"; base="${base% \[}"; base="${base% \{}"
-        base="$(trim "$base")"
-        [[ -n "$base" && -n "$num" ]] && { printf '%s|%s\n' "$base" "$num"; return 0; }
-    fi
+  # Pattern set 2: Vol/Volume, Part/Pt
+  if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([Vv]ol(?:ume)?|[Pp](?:art|t\.?))$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
+    local base="${BASH_REMATCH[1]}"
+    local num="${BASH_REMATCH[3]}"
+    base="$(tidy_base "$base")"
+    [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
+  fi
 
-    if [[ "$name" =~ $re_b ]]; then
-        local base="${BASH_REMATCH[1]}"
-        local num="${BASH_REMATCH[2]}"
-        base="$(trim "$base")"
-        base="${base% \(}"; base="${base% \[}"; base="${base% \{}"
-        base="$(trim "$base")"
-        [[ -n "$base" && -n "$num" ]] && { printf '%s|%s\n' "$base" "$num"; return 0; }
-    fi
+  # Pattern set 3: Side A/B/C… (map letters → 1/2/3…)
+  if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([Ss]ide)[[:space:]]*([A-Za-z])\)?([[:space:]]*.*)?$ ]]; then
+    local base="${BASH_REMATCH[1]}"
+    local letter="${BASH_REMATCH[3]}"
+    local num; num="$(letter_to_num "$letter")" || num=""
+    base="$(tidy_base "$base")"
+    [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
+  fi
 
-    return 1
+  # Pattern set 4: "1 of 2" / "1/2"
+  if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([0-9]+)[[:space:]]*(?:of|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$ ]]; then
+    local base="${BASH_REMATCH[1]}"
+    local num="${BASH_REMATCH[2]}"
+    base="$(tidy_base "$base")"
+    [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
+  fi
+
+  # Pattern set 5: compact forms WITHOUT spaces/brackets:
+  # "Title Disc02", "Title CD2", "Title Vol.2", "Title Pt.3"
+  if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*(?:$re_core|[Vv]ol(?:ume)?|[Pp](?:art|t\.?))$re_sep$re_num([[:space:]]*.*)?$ ]]; then
+    local base="${BASH_REMATCH[1]}"
+    local num="${BASH_REMATCH[3]}"
+    base="$(tidy_base "$base")"
+    [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
+  fi
+
+  return 1
 }
 
 # Build/refresh a single M3U for a given base in one directory.
