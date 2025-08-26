@@ -195,6 +195,15 @@ _draw_progress() {
   printf "\r\033[2K\033[?7l%s\033[?7h" "$text" > /dev/tty
 }
 
+_now_ms() {
+    local s
+    if s="$(date +%s%3N 2>/dev/null)"; then
+        printf '%s' "$s"
+    else
+        printf '%s' $(( $(date +%s) * 1000 ))
+    fi
+}
+
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
 # --- REPLACE your _chdman_progress_filter with this ---
 _chdman_progress_filter() {
@@ -209,7 +218,7 @@ _chdman_progress_filter() {
       [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
       if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
 
-      now=$(date +%s%3N 2>/dev/null || date +%s); ms=$now
+      ms="$(_now_ms)"
       if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
         _draw_progress "$phase" "$pct" "$ratio"
         last_draw=$ms
