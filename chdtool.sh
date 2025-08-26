@@ -151,48 +151,55 @@ PROGRESS_MARGIN=28         # spare columns to avoid wrap (emoji-width safety)
 _repeat_char() { local n=$1 c=$2 out=""; while (( n-- > 0 )); do out+="$c"; done; printf "%s" "$out"; }
 
 # Draw a single-line status (bar or line) to stderr, staying on one row.
-# Put these near your config if you want (tweakable)
 PROGRESS_BAR_MAX=${PROGRESS_BAR_MAX:-40}
 PROGRESS_FUDGE=${PROGRESS_FUDGE:-8}   # extra safety to prevent wrap with wide glyphs
 
-_draw_progress() {
-  local phase="$1" pct="$2" ratio="$3"
-  local style="${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}"
-
-  if [[ "$style" == "auto" ]]; then
-    if [[ -t 2 ]]; then style="bar"; else style="none"; fi
-  fi
-  [[ "$style" == "none" ]] && return 0
-
-  local cols="${COLUMNS:-}"
-  [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
-  [[ -z "$cols" ]] && cols=80
-
-  local left="⏳ ${phase} ${pct}%"
-  [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
-
-  local text
-  if [[ "$style" == "line" ]]; then
-    text="$left"
+_term_print() {
+  if [[ -t 2 && -w /dev/tty ]]; then
+    printf "%b" "$1" > /dev/tty
   else
-    local margin=${PROGRESS_MARGIN:-20}
-    local barw=$(( cols - (${#left} + margin) ))
-    local cap=${PROGRESS_BAR_MAX:-40}
-    (( barw > cap )) && barw=$cap
-    (( barw < 10 )) && barw=10
-    local scaled; scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN{ printf "%.0f",(p/100.0)*w }')" || scaled=0
-    [[ -z "$scaled" ]] && scaled=0
-    (( scaled < 0 )) && scaled=0
-    (( scaled > barw )) && scaled=$barw
-    local filled=$scaled
-    local empty=$(( barw - filled ))
-    text="$left [$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
+    printf "%b" "$1" >&2
   fi
+}
 
-  (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
+_draw_progress() {
+    local phase="$1" pct="$2" ratio="$3"
+    local style="${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}"
 
-  # CR + clear + draw with autowrap temporarily off; NO newline
-  printf "\r\033[2K\033[?7l%s\033[?7h" "$text" > /dev/tty
+    if [[ "$style" == "auto" ]]; then
+        if [[ -t 2 ]]; then style="bar"; else style="none"; fi
+    fi
+    [[ "$style" == "none" ]] && return 0
+
+    local cols="${COLUMNS:-}"
+    [[ -z "$cols" && -t 2 ]] && cols=$(tput cols 2>/dev/null || echo 80)
+    [[ -z "$cols" ]] && cols=80
+
+    local left="⏳ ${phase} ${pct}%"
+    [[ -n "$ratio" ]] && left+=" (r=${ratio}%)"
+
+    local text
+    if [[ "$style" == "line" ]]; then
+        text="$left"
+    else
+        local margin=${PROGRESS_MARGIN:-20}
+        local barw=$(( cols - (${#left} + margin) ))
+        local cap=${PROGRESS_BAR_MAX:-40}
+        (( barw > cap )) && barw=$cap
+        (( barw < 10 )) && barw=10
+        local scaled; scaled="$(awk -v p="$pct" -v w="$barw" 'BEGIN{ printf "%.0f",(p/100.0)*w }')" || scaled=0
+        [[ -z "$scaled" ]] && scaled=0
+        (( scaled < 0 )) && scaled=0
+        (( scaled > barw )) && scaled=$barw
+        local filled=$scaled
+        local empty=$(( barw - filled ))
+        text="$left [$(_repeat_char "$filled" "#")$(_repeat_char "$empty" "-")]"
+    fi
+
+    (( ${#text} > cols-2 )) && text="${text:0:cols-2}"
+
+    # CR + clear + draw with autowrap temporarily off; NO newline
+    _term_print "\r\033[2K\033[?7l${text}\033[?7h"
 }
 
 _now_ms() {
@@ -207,38 +214,38 @@ _now_ms() {
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
 # --- REPLACE your _chdman_progress_filter with this ---
 _chdman_progress_filter() {
-  # Always re-enable autowrap on exit/interrupt
-  trap 'printf "\033[?7h" > /dev/tty' INT TERM EXIT
+    # Always re-enable autowrap on exit/interrupt
+    trap 'printf "\033[?7h" > /dev/tty' INT TERM EXIT
 
-  local last_draw=0 phase="Compressing" ratio="" progress_active=0 now ms
+    local last_draw=0 phase="Compressing" ratio="" progress_active=0 now ms
 
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
-      local pct="${BASH_REMATCH[1]}"
-      [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
-      if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
+            local pct="${BASH_REMATCH[1]}"
+            [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
+            if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
 
-      ms="$(_now_ms)"
-      if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
-        _draw_progress "$phase" "$pct" "$ratio"
-        last_draw=$ms
-        progress_active=1
-      fi
-      continue
-    fi
+            ms="$(_now_ms)"
+            if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
+                _draw_progress "$phase" "$pct" "$ratio"
+                last_draw=$ms
+                progress_active=1
+            fi
+            continue
+        fi
 
-    # Ignore obvious chopped progress fragments
-    if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
-       [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
-      continue
-    fi
+        # Ignore obvious chopped progress fragments
+        if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
+            [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
+            continue
+        fi
 
-    # Send diagnostics directly to the logfile (NO terminal output, NO newline to TTY)
-    printf "[%s] %s\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$line" >> "$LOGFILE"
-  done
+        # Send diagnostics directly to the logfile (NO terminal output, NO newline to TTY)
+        printf "[%s] %s\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$line" >> "$LOGFILE"
+    done
 
-  # At EOF: end the progress line neatly with a single newline
-  (( progress_active )) && printf "\r\033[2K\n" > /dev/tty
+    # At EOF: end the progress line neatly with a single newline
+    (( progress_active )) && _term_print "\r\033[2K\n"
 }
 
 # Wrapper to run chdman with a clean one-line progress display.
