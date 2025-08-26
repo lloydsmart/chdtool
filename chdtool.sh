@@ -352,6 +352,49 @@ parse_disc_info() {
   return 1
 }
 
+# Make a filename safe across Linux/macOS/Windows shares.
+# - normalizes Unicode if `uconv` is available
+# - removes control chars
+# - replaces / \ : * ? " < > | with '-'
+# - collapses whitespace; trims ends
+# - optional Windows reserved-name guard (SANITIZE_CROSSPLATFORM=0 to disable)
+# - truncates to a safe length (default 200 chars)
+sanitize_filename() {
+  local s="$1"
+
+  # Unicode NFKC normalization if ICU's uconv exists (nice-to-have)
+  if command -v uconv >/dev/null 2>&1; then
+    s="$(printf '%s' "$s" | uconv -x any-nfkc 2>/dev/null || printf '%s' "$s")"
+  fi
+
+  # Strip control chars
+  s="$(printf '%s' "$s" | tr -d '\000-\037\177')"
+
+  # Replace problematic characters and tidy spaces/dashes
+  s="$(printf '%s' "$s" \
+      | sed -E 's/[\/\\:*?"<>|]/-/g; s/[[:space:]]+/ /g; s/[[:space:]]*-[[:space:]]*/ - /g')"
+
+  # Trim leading/trailing separators/spaces
+  s="$(printf '%s' "$s" | sed -E 's/^[[:space:]._-]+//; s/[[:space:]._-]+$//')"
+
+  # Guard Windows reserved basenames for SMB users
+  if [[ "${SANITIZE_CROSSPLATFORM:-1}" == 1 ]]; then
+    case "${s^^}" in
+      CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]) s="_$s";;
+    esac
+  fi
+
+  # Length cap (characters). 200 is comfortably under 255-byte limits.
+  local max=${FILENAME_MAX_CHARS:-200}
+  if (( ${#s} > max )); then
+    s="${s:0:max}"
+    s="$(printf '%s' "$s" | sed -E 's/[[:space:]._-]+$//')"  # re-trim tail
+  fi
+
+  [[ -z "$s" ]] && s="Set"
+  printf '%s' "$s"
+}
+
 # Build/refresh a single M3U for a given base in one directory.
 # We only consider CHDs that share the parsed base (case-insensitive).
 generate_m3u_for_base() {
@@ -387,7 +430,17 @@ generate_m3u_for_base() {
     mapfile -t members <<< "$sorted"
 
     # Write idempotently (relative file names in body)
-    local m3u_path="$outdir/${base}.m3u"
+    # inside generate_m3u_for_base, after computing safe_base
+    local safe_base; safe_base="$(sanitize_filename "$base")"
+    local legacy_path="$outdir/${base}.m3u"
+    local m3u_path="$outdir/${safe_base}.m3u"
+
+    # migrate legacy → sanitized (only if sanitized doesn't exist yet)
+    if [[ -f "$legacy_path" && ! -f "$m3u_path" ]]; then
+        mv -f "$legacy_path" "$m3u_path"
+        log "🧹 Renamed legacy M3U → sanitized: $(basename "$legacy_path") → $(basename "$m3u_path")"
+    fi
+
     local tmp_m3u="$m3u_path.tmp"
     : > "$tmp_m3u"
     for f in "${members[@]}"; do
