@@ -217,7 +217,7 @@ _chdman_progress_filter() {
     # Always re-enable autowrap on exit/interrupt
     trap 'printf "\033[?7h" > /dev/tty' INT TERM EXIT
 
-    local last_draw=0 phase="Compressing" ratio="" progress_active=0 now ms
+    local last_draw=0 phase="Compressing" ratio="" progress_active=0 ms
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
