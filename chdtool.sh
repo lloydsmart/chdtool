@@ -369,19 +369,6 @@ _chdman_progress_filter() {
     (( progress_active )) && _term_print "\r\033[2K\n"
 }
 
-# Wrapper to run chdman with a clean one-line progress display.
-# Usage: run_chdman_progress createcd -i "$in" -o "$out"
-run_chdman_progress() {
-    # local last_draw=0 phase="Compressing" ratio="" progress_active=0 ms
-    local bin="${CHDMAN_BIN:-chdman}"
-    if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-        "$bin" "$@" 2>&1 | _chdman_progress_filter
-    else
-        "$bin" "$@"
-    fi
-}
-# ---------- end chdman progress ----------
-
 # ---------- M3U (per-iteration) helpers ----------
 # Trim leading/trailing spaces/dots/underscores/dashes
 trim() {
