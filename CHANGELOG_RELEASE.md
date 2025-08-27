@@ -1,8 +1,3 @@
-# Changelog
-All notable changes to this project will be documented in this file.
-
-This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0),
-and uses semantic versioning for tags (vMAJOR.MINOR.PATCH).
 ## [0.2.3] - 2025-08-27
 
 ### Fixes
