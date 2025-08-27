@@ -1,0 +1,41 @@
+# Generate a Keep a Changelog-styled changelog from tags.
+# Works even if not using strict Conventional Commits.
+[changelog]
+header = """# Changelog
+All notable changes to this project will be documented in this file.
+
+This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0),
+and uses semantic versioning for tags (vMAJOR.MINOR.PATCH).
+"""
+footer = ""
+trim = true
+
+[git]
+# Include merge commits so PR titles show up.
+merge_commits = true
+# Exclude noise (dependabot bumps etc.) — tweak as you like.
+commit_preprocessors = [
+  { pattern = "^(.*)\\(#(\\d+)\\)$", replace = "$1 (PR #$2)" },
+]
+# Group commits by conventional-ish prefixes if present.
+# Anything else lands under "Other".
+tag_pattern = "^v?\\d+\\.\\d+\\.\\d+$"
+filter_commits = true
+conventional_commits = true
+# Fallback to subject if no type/scope found
+commit_parsers = [
+  { message = "^feat(\\(.+\\))?!?:", group = "Features" },
+  { message = "^fix(\\(.+\\))?!?:",  group = "Fixes" },
+  { message = "^perf(\\(.+\\))?!?:", group = "Performance" },
+  { message = "^refactor(\\(.+\\))?!?:", group = "Refactoring" },
+  { message = "^docs(\\(.+\\))?!?:", group = "Docs" },
+  { message = "^test(\\(.+\\))?!?:", group = "Tests" },
+  { message = "^ci(\\(.+\\))?!?:",   group = "CI" },
+  { message = "^build(\\(.+\\))?!?:", group = "Build" },
+  { message = "^chore(\\(.+\\))?!?:", group = "Chores" },
+  { message = "^Merge pull request",  group = "Merged PRs" },
+  { message = ".*",                    group = "Other" },
+]
+
+[remote]
+github = { owner = "lloydsmart", repo = "chdtool" }

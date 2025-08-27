@@ -1,90 +1,132 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0),
+and uses semantic versioning for tags (vMAJOR.MINOR.PATCH).
+## [0.2.0] - 2025-08-27
 
-## [Unreleased]
+### CI
 
-### Added
-- **CD/DVD detection in conversion**: Script now distinguishes between CD and DVD images.
-  - Uses `createcd` for CDs and `createdvd` for DVDs (if supported by `chdman`).
-  - Falls back to `createcd` with a warning if `createdvd` is unavailable.
-  - Logs include 💿 (CD) and 📀 (DVD) icons for clarity.
+- Add test to make sure M3U isn't broken
+- Integrate Makefile
+- Fix: handle dependencies
+- Add stubs for unrar and 7z, so we don't have to install them
 
----
+### Features
 
-## [0.6.0] - 2025-07-12
-### Added
-- Detection of `chdman` version and capabilities (`createdvd` support).
-- Improved log output with visual icons for CD vs. DVD conversion.
+- *(m3u)* Robust multi-disc parsing + fix dangling bracket in base
+- Add more robust M3U filename sanitization
+- Robust "now in ms"
+- Safer terminal printing
+- Better logging
+- Logging: add log levels
+- Logging: minor fixes
+- Add more cleanup
+- Added interrupt handling to exit cleanly in terminal
+- Also clean up the .tmp files in the input directory
 
-### Fixed
-- Prevented unrelated games with similar names from being grouped into the same `.m3u`.
-- Correct handling of multi-disc `.m3u` creation on a per-loop basis.
+### Fixes
 
-### Example
-```
-[2025-07-05 14:00:12] ▶️ Processing file: /mnt/retronas/roms/sega/saturn/Virtua Fighter (Europe).zip
-[2025-07-05 14:00:14] 💿 Converting: Virtua Fighter (Europe).cue → Virtua Fighter (Europe).chd.tmp
-[2025-07-05 14:01:20] ✅ Verified CHD: Virtua Fighter (Europe).chd.tmp
-[2025-07-05 14:01:20] 🔄 Replaced old CHD with new verified CHD: Virtua Fighter (Europe).chd
-[2025-07-05 14:01:20] 📉 Space saving for Virtua Fighter (Europe).zip: 640 MB → 375 MB, saved 265 MB (41%)
-```
+- Shellcheck SC2034 unused variable "now"
+- SC2034 unused variable "now"
+- Typos
+- SC2119 argument references
+- Minor logigng fixes
+- Various
+- Minor fixes
+- Minor fixes, improve logging, make regex safer
+- Logging order + logfile dir guard
+- NUL-safe find + mapfile
+- NUL-safe find + mapfile
+- Make validate_cue_file NUL-safe
+- Normalize CHDMAN_MSG_LEVEL
+- Regex tweaks
+- Send usage errors to stderr in the arg parser
+- Check input dir BEFORE creating log dir
+- Local _cleanup()
+- Don't pipe to a function, use here-string instead
+- Add -- to destructive commands
+- Remove duplicate defaulting of PROGRESS_BAR_MAX
+- Also run _cleanup() on unexpected errors
+- Force C collation for the numeric sort for systems with non-C locales
+- Update verify_chds(). Uses the single-line progress bar (via _chdman_progress_filter + PHASE_DEFAULT="Verifying"),
+- Simplify progress logging
+- Better comment
+- Trim unused bits
+- Make cleanup_all a bit safer
+- M3U generation
+## [0.1.4] - 2025-08-22
 
----
+### Fixes
 
-## [0.5.0] - 2025-07-10
-### Added
-- `--keep-originals` flag to preserve source archives/disc images after conversion.
-- Smarter `.m3u` generation logic:
-  - Only generates when multiple CHDs exist **and** input files are missing.
-  - Improved normalization to correctly identify disc sets.
-- Extended logging: game base names, normalized names, and remaining inputs.
+- Multi-disc set detection
+- Multi-disc set detection
+## [0.1.3] - 2025-08-22
 
-### Fixed
-- Archives no longer skipped due to false negatives in disc file detection.
-- Prevented premature script exit before all files were processed.
-- Stopped `.m3u` generation for single-disc games.
+### CI
 
----
+- Fix SC2015
 
-## [0.4.0] - 2025-07-04
-### Added
-- Global temp directory tracking via `TEMP_DIRS` array with `trap` cleanup.
-- `inputs_remaining_for_base()` check to ensure `.m3u` creation only occurs when all discs are processed.
+### Docs
 
-### Fixed
-- Corrected CHD size calculation for archives (sum of CHDs instead of input size).
-- Fixed double-increment bug in failure counter on verification failure.
-- Standardized `verify_chds` return codes (true/false).
+- Minor change
 
----
+### Features
 
-## [0.3.0] - 2025-07-03
-### Added
-- CLI argument parsing (`--keep-originals`, `--dry-run`).
-- Structured logging functions: `log` and `verify_output_log`.
+- Inital M3U logic
+- Add progressbar
+- *(chdtool)* Per-iteration M3U generation + single-line chdman progress
 
-### Fixed
-- Disc detection regex improvements for `.zip`, `.rar`, `.7z`, `.cue`, `.iso`, `.gdi`.
+### Fixes
 
----
+- Progress bar repeating
+- More progressbar tweaks
+- More progressbar tweaks
+- Progressbar still being a pita
+- More progressbar fixes
+- Progressbar
+- Progressbar
+- Typo
+- Progressbar
+- Progressbar
+- Progressbar
+- Progressbar
+- Progressbar
+- Progressbar
+- Progressbar
+- Progressbar
+- Progressbar
+- Progressbar
+- Progressbar (cleanup)
+- Ci: SC2034
+## [0.1.2] - 2025-08-21
 
-## [0.2.0] - 2025-07-01
-### Added
-- Per-input temp directories with immediate cleanup.
-- Space-saving calculation (original vs. CHD size) in logs.
+### CI
 
-### Fixed
-- Logging improvements to include detailed verification output.
+- Add release workflow
 
----
+### Docs
 
-## [0.1.0] - 2025-06-30
-### Added
-- Initial working script:
-  - Converts supported disc images (`.cue`, `.iso`, `.gdi`, `.ccd`) and archives (`.zip`, `.7z`, `.rar`) into CHD.
-  - Verifies CHDs after creation.
-  - Deletes originals after successful conversion.
-  - Basic `.m3u` generation for multi-disc games.
+- Improved readme
+- Minor fix
+## [0.1.1] - 2025-08-21
+
+### CI
+
+- Add ShellCheck workflow
+
+### Docs
+
+- Add some standard files
+- Updated README and created CHANGELOG
+
+### Features
+
+- CD/DVD detection with createcd/createdvd
+
+### Fixes
+
+- *(shellcheck)* Resolve SC2155, SC2076, and SC2086 warnings
+- Shellcheck compliance SC2283
+## [0.1.0] - 2025-08-21
+
