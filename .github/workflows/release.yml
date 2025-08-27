@@ -20,39 +20,23 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      # Install git-cliff via prebuilt binary (works on ubuntu-latest)
-      - name: Install git-cliff
-        run: |
-          set -euxo pipefail
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64)  ASSET="git-cliff-x86_64-unknown-linux-gnu.tar.gz" ;;
-            aarch64) ASSET="git-cliff-aarch64-unknown-linux-gnu.tar.gz" ;;
-            *) echo "Unsupported arch: $ARCH"; exit 1 ;;
-          esac
-          curl -fsSL "https://github.com/orhun/git-cliff/releases/latest/download/${ASSET}" -o /tmp/git-cliff.tar.gz
-          tar -xzf /tmp/git-cliff.tar.gz -C /tmp
-          sudo mv /tmp/git-cliff /usr/local/bin/git-cliff
-          git-cliff --version
-
-      # Generate release notes for this tag using cliff.toml (or .cliff.toml)
-      - name: Generate release notes
-        run: |
-          set -euxo pipefail
-          CONF="cliff.toml"
-          [ -f ".cliff.toml" ] && CONF=".cliff.toml"
-          git cliff --config "$CONF" --tag "${GITHUB_REF_NAME}" --strip header > CHANGELOG_RELEASE.md
-          echo "Preview (first 120 lines):"
-          sed -n '1,120p' CHANGELOG_RELEASE.md
+      # Generate release notes for this tag (used as Release body)
+      - name: Generate release notes with git-cliff
+        id: cliff_notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          # notes only for the pushed tag, without the big header
+          args: -vv --tag "${{ github.ref_name }}" --strip header
+        env:
+          OUTPUT: CHANGELOG_RELEASE.md
+          GITHUB_REPO: ${{ github.repository }}
 
       - name: Prepare artifacts
         run: |
           set -euo pipefail
-          # Ensure script is executable and provide a no-extension copy
           chmod +x chdtool.sh || true
           cp chdtool.sh chdtool
-
-          # Package distributables (uses the repo at this tag)
           mkdir -p dist
           tar -czf "dist/chdtool-${GITHUB_REF_NAME}.tar.gz" chdtool README.md LICENSE CHANGELOG.md || true
           zip -j "dist/chdtool-${GITHUB_REF_NAME}.zip" chdtool README.md LICENSE CHANGELOG.md || true
@@ -61,7 +45,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          body_path: CHANGELOG_RELEASE.md
+          body_path: ${{ steps.cliff_notes.outputs.changelog }}   # file generated above
           files: |
             dist/*
             chdtool.sh
@@ -70,14 +54,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Regenerate the full CHANGELOG.md (for main) and open a PR
-      - name: Regenerate full CHANGELOG.md (for main)
-        run: |
-          set -euxo pipefail
-          CONF="cliff.toml"
-          [ -f ".cliff.toml" ] && CONF=".cliff.toml"
-          git cliff --config "$CONF" -o CHANGELOG.md
-          git status --porcelain
+      # Regenerate the full CHANGELOG.md for main and open a PR
+      - name: Regenerate full CHANGELOG.md
+        id: cliff_full
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: -vv
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
 
       - name: Open PR to update CHANGELOG.md on main
         uses: peter-evans/create-pull-request@v6
