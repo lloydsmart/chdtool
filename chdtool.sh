@@ -559,11 +559,11 @@ generate_m3u_for_base() {
     # Sort by parsed disc number
     local sorted
     sorted="$(
-      for f in "${members[@]}"; do
-        stem="${f##*/}"; stem="${stem%.chd}"
-        p="$(parse_disc_info "$stem")"
-        echo "${p##*|}|$f"
-      done | sort -t'|' -k1,1n | cut -d'|' -f2
+        for f in "${members[@]}"; do
+            stem="${f##*/}"; stem="${stem%.chd}"
+            p="$(parse_disc_info "$stem")"
+            echo "${p##*|}|$f"
+        done | LC_ALL=C sort -t'|' -k1,1n | cut -d'|' -f2
     )"
     mapfile -t members <<< "$sorted"
 
