@@ -10,7 +10,8 @@ USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] <input directory>"
 KEEP_ORIGINALS=false
 RECURSIVE=false
 INPUT_DIR=""
-
+RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
+    
 # Manual parsing to support long options
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -90,6 +91,7 @@ _emit_log() {
       {
         echo "LEVEL=$lvl"
         # Emit message line-by-line for readability in `journalctl -t chdtool`
+        echo "RUN_ID=$RUN_ID"
         while IFS= read -r line; do
           echo "$line"
         done <<< "$msg"
@@ -117,12 +119,15 @@ _emit_log() {
 
 # Public logger. Backwards-compatible: `log "message"` still works.
 # Optional levels: `log INFO "message"`, `log WARN "msg"`, etc.
+LOG_LEVEL_THRESHOLD="${LOG_LEVEL_THRESHOLD:-INFO}"   # DEBUG|INFO|WARN|ERROR
+__level_num() { case "$1" in DEBUG) echo 10;; INFO) echo 20;; WARN) echo 30;; ERROR) echo 40;; *) echo 999;; esac; }
+
 log() {
   local lvl="INFO"
-  # If first arg *looks* like a level, use it
-  case "${1:-}" in
-    DEBUG|INFO|WARN|ERROR) lvl="$1"; shift ;;
-  esac
+  case "${1:-}" in DEBUG|INFO|WARN|ERROR) lvl="$1"; shift ;; esac
+  if (( $(__level_num "$lvl") < $(__level_num "$LOG_LEVEL_THRESHOLD") )); then
+    return 0
+  fi
   _emit_log "$lvl" "$*"
 }
 
@@ -300,7 +305,8 @@ _now_ms() {
 # --- REPLACE your _chdman_progress_filter with this ---
 _chdman_progress_filter() {
     # Always re-enable autowrap on exit/interrupt
-    trap 'printf "\033[?7h" > /dev/tty' INT TERM EXIT
+    _restore_wrap() { _term_print "\033[?7h"; }
+    trap _restore_wrap INT TERM EXIT
 
     local last_draw=0 phase="Compressing" ratio="" progress_active=0 ms
 
