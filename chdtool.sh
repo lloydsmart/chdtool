@@ -328,9 +328,10 @@ _now_ms() {
 # Use with: PHASE_DEFAULT="Converting" chdman createcd … | _chdman_progress_filter
 #        or: PHASE_DEFAULT="Verifying"  chdman verify … | _chdman_progress_filter
 _chdman_progress_filter() {
-    # Always re-enable autowrap on exit/interrupt
+    # Always re-enable autowrap on exit/interrupt; return non-zero on INT/TERM
     _restore_wrap() { _term_print "\033[?7h"; }
-    trap _restore_wrap INT TERM EXIT
+    trap '_restore_wrap; return 130' INT TERM
+    trap _restore_wrap EXIT
 
     local last_draw=0 phase="${PHASE_DEFAULT:-Compressing}" ratio="" progress_active=0 ms
 
@@ -593,6 +594,34 @@ maybe_generate_m3u_for() {
     generate_m3u_for_base "$outdir" "$base"
 }
 # ---------- end M3U helpers ----------
+# --- Global interrupt + cleanup handling --------------------------------------
+# Track temp dirs created during processing so we can clean them on SIGINT/TERM
+declare -a TEMP_DIRS=()
+
+_restore_wrap_global() {
+  # Make sure terminal autowrap is re-enabled and the progress line cleared
+  # (safe to emit even if no progress was showing)
+  _term_print "\r\033[2K\033[?7h\n"
+}
+
+cleanup_all() {
+  # Remove any temp dirs that might still exist
+  if ((${#TEMP_DIRS[@]})); then
+    for d in "${TEMP_DIRS[@]}"; do
+      [[ -n "$d" && -d "$d" ]] && rm -rf -- "$d" && log INFO "🧹 Cleaned up temp dir: $d"
+    done
+  fi
+}
+
+_on_interrupt() {
+  # One place to handle Ctrl-C/TERM: restore terminal, clean, then exit(130)
+  _restore_wrap_global
+  log WARN "🛑 Interrupted — cleaning up and exiting…"
+  cleanup_all
+  exit 130
+}
+# Ctrl-C (INT) and TERM should both stop the whole script
+trap _on_interrupt INT TERM
 
 verify_chds() {
     local outdir="$1"; shift
@@ -895,6 +924,7 @@ process_input() {
     if is_in_list "$ext" "${archive_exts[@]}"; then
         temp_dir="$(mktemp -d -t "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
         log INFO "📦 Extracting $input_file to $temp_dir"
+        TEMP_DIRS+=("$temp_dir")
         case "$ext" in
             zip) unzip -qq "$input_file" -d "$temp_dir" ;;
             rar) unrar x -o+ "$input_file" "$temp_dir" >/dev/null ;;
