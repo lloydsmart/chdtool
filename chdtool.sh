@@ -75,7 +75,7 @@ __should_mirror_console() {
   case "${LOG_TEE_CONSOLE}" in
     1|true|yes) return 0 ;;
     0|false|no) return 1 ;;
-    auto) [[ -t 1 ]] && return 0 || return 1 ;;
+    auto) [[ -t 2 ]] && return 0 || return 1 ;;  # use fd 2
     *) return 1 ;;
   esac
 }
@@ -800,9 +800,16 @@ process_input() {
     archive_size_bytes=$(get_file_size "$input_file")
     local ext_regex
     ext_regex="$(build_ext_regex "${disc_exts[@]}")"
-
     local temp_dir=""
 
+    local _cleanup() {
+        if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
+            rm -rf "$temp_dir"
+            log INFO "🧹 Cleaned up temp dir: $temp_dir"
+        fi
+    }
+    trap _cleanup RETURN  # runs on any return/exit from this function
+    
     if is_in_list "$ext" "${archive_exts[@]}"; then
         archives_processed=$((archives_processed + 1))
         case "$ext" in
