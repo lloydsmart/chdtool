@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "stub 7z: not used in tests" >&2
+exit 2

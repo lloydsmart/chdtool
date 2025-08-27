@@ -9,6 +9,8 @@ test: test-setup test-m3u test-m3u-single
 
 test-setup:
 	chmod +x tests/bin/chdman
+	chmod +x tests/bin/unrar
+	-chmod +x tests/bin/7z
 	chmod +x tests/test_m3u.sh tests/test_m3u_single.sh
 
 test-m3u:
