@@ -39,14 +39,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$INPUT_DIR" ]]; then
-    echo "$USAGE" >&2; exit 1
+  echo "$USAGE" >&2; exit 1
 fi
-
-mkdir -p logs
 if [[ ! -d "$INPUT_DIR" ]]; then
   echo "❌ Input directory does not exist or is not a directory: $INPUT_DIR" >&2
   exit 1
 fi
+mkdir -p logs
 LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
 
 # --- Pluggable logging: console/file/syslog/journald (auto) -------------------
