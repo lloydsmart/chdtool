@@ -39,17 +39,102 @@ fi
 mkdir -p logs
 LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
 
+# --- Pluggable logging: console/file/syslog/journald (auto) -------------------
+# Control via env vars (no root needed to write to journald/syslog):
+#   LOG_DEST=auto|console|file|syslog|journald
+#   LOGFILE=/path/to/file   (used when LOG_DEST=file; defaults to ./logs/…)
+#   LOG_TAG=chdtool
+LOG_DEST="${LOG_DEST:-auto}"
+LOG_TAG="${LOG_TAG:-chdtool}"
+
+_detect_backend() {
+  case "$LOG_DEST" in
+    journald) echo journald ;;
+    syslog)   echo syslog ;;
+    file)     echo file ;;
+    console)  echo console ;;
+    auto)
+      if [[ -S /run/systemd/journal/socket ]] && command -v systemd-cat >/dev/null 2>&1; then
+        echo journald
+      elif command -v logger >/dev/null 2>&1; then
+        echo syslog
+      else
+        echo file
+      fi
+      ;;
+    *) echo file ;;
+  esac
+}
+LOG_BACKEND="$(_detect_backend)"
+
+# Internal emitter: $1=LEVEL (INFO/WARN/ERROR/DEBUG), $2...=message
+_emit_log() {
+  local lvl="$1"; shift || true
+  local msg="${*:-}"
+  local ts
+  ts="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+  # Map to syslog priority
+  local pri=info
+  case "$lvl" in
+    DEBUG) pri=debug ;;
+    INFO)  pri=info  ;;
+    WARN)  pri=warning ;;
+    ERROR) pri=err ;;
+  esac
+
+  case "$LOG_BACKEND" in
+    journald)
+      # Anyone can write to journald via systemd-cat (root only needed to read *all* logs)
+      # We include LEVEL as the first line so it's searchable in journal.
+      {
+        echo "LEVEL=$lvl"
+        # Emit message line-by-line for readability in `journalctl -t chdtool`
+        while IFS= read -r line; do
+          echo "$line"
+        done <<< "$msg"
+      } | systemd-cat --priority="$pri" --identifier="$LOG_TAG"
+      ;;
+    syslog)
+      # Anyone can send to syslog with logger
+      while IFS= read -r line; do
+        logger -p "user.$pri" -t "$LOG_TAG" -- "$lvl: $line"
+      done <<< "$msg"
+      ;;
+    file)
+      # Default to your existing ./logs/… path; no root needed there
+      while IFS= read -r line; do
+        printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" >> "$LOGFILE"
+      done <<< "$msg"
+      ;;
+    console|*)
+      while IFS= read -r line; do
+        printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" | tee -a "$LOGFILE"
+      done <<< "$msg"
+      ;;
+  esac
+}
+
+# Public logger. Backwards-compatible: `log "message"` still works.
+# Optional levels: `log INFO "message"`, `log WARN "msg"`, etc.
 log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOGFILE"
+  local lvl="INFO"
+  # If first arg *looks* like a level, use it
+  case "${1:-}" in
+    DEBUG|INFO|WARN|ERROR) lvl="$1"; shift ;;
+  esac
+  _emit_log "$lvl" "$*"
 }
 
 log "🚀 Script started, input dir: $INPUT_DIR"
 [[ "$RECURSIVE" == true ]] && log "📂 Recursive mode enabled — scanning subdirectories"
 
 verify_output_log() {
-    while IFS= read -r line; do
-        printf "[%s] %s\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$line" >> "$LOGFILE"
-    done
+  local lvl="${1:-INFO}"
+  case "$lvl" in DEBUG|INFO|WARN|ERROR) shift || true ;; *) lvl="INFO" ;; esac
+  while IFS= read -r line; do
+    log "$lvl" "$line"
+  done
 }
 
 is_in_list() {
