@@ -12,6 +12,10 @@ RECURSIVE=false
 INPUT_DIR=""
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 CHDMAN_MSG_LEVEL="${CHDMAN_MSG_LEVEL:-DEBUG}"
+case "${CHDMAN_MSG_LEVEL^^}" in
+  DEBUG|INFO|WARN|ERROR) ;;     # OK
+  *) CHDMAN_MSG_LEVEL="INFO" ;; # fallback
+esac
     
 # Manual parsing to support long options
 while [[ $# -gt 0 ]]; do
