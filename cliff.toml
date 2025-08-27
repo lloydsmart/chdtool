@@ -1,5 +1,3 @@
-# Generate a Keep a Changelog-styled changelog from tags.
-# Works even if not using strict Conventional Commits.
 [changelog]
 header = """# Changelog
 All notable changes to this project will be documented in this file.
@@ -11,18 +9,11 @@ footer = ""
 trim = true
 
 [git]
-# Include merge commits so PR titles show up.
 merge_commits = true
-# Exclude noise (dependabot bumps etc.) — tweak as you like.
-commit_preprocessors = [
-  { pattern = "^(.*)\\(#(\\d+)\\)$", replace = "$1 (PR #$2)" },
-]
-# Group commits by conventional-ish prefixes if present.
-# Anything else lands under "Other".
 tag_pattern = "^v?\\d+\\.\\d+\\.\\d+$"
 filter_commits = true
 conventional_commits = true
-# Fallback to subject if no type/scope found
+
 commit_parsers = [
   { message = "^feat(\\(.+\\))?!?:", group = "Features" },
   { message = "^fix(\\(.+\\))?!?:",  group = "Fixes" },
