@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Paths
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="$REPO_ROOT/chdtool.sh"   # <-- adjust name/path if needed
+SCRIPT="${SCRIPT:-$REPO_ROOT/chdtool.sh}"   # <— CHANGED: allow override via env
 FIX="$(mktemp -d)"
 trap 'rm -rf "$FIX"' EXIT
 
-# Put our stub chdman first in PATH
 export PATH="$REPO_ROOT/tests/bin:$PATH"
-
-# Quiet progress noise; keep originals so we can inspect zip afterward
 export PROGRESS_STYLE=none
 export KEEP_ORIGINALS=true
 export LOG_DEST=console
@@ -20,21 +16,19 @@ export LOG_LEVEL_THRESHOLD=DEBUG
 touch "$FIX/Virtua Fighter (Disc 1).chd"
 touch "$FIX/Virtua Fighter (Disc 2).chd"
 
-# 2) Zip that advertises matching disc *images* so your script
-#    builds expected_chds from archive entries (no real payload needed)
+# 2) Create a zip whose listing seeds expected_chds
 (
   cd "$FIX"
-  # files only need to exist inside the zip list; your code reads names via unzip -Z1
   printf "" > "Virtua Fighter (Disc 1).cue"
   printf "" > "Virtua Fighter (Disc 2).cue"
   zip -q "vf.zip" "Virtua Fighter (Disc 1).cue" "Virtua Fighter (Disc 2).cue"
   rm -f "Virtua Fighter (Disc 1).cue" "Virtua Fighter (Disc 2).cue"
 )
 
-# 3) Run the script against the directory
+# 3) Run the script
 bash "$SCRIPT" "$FIX"
 
-# 4) Assert M3U exists with correct name and order
+# 4) Assert M3U exists + order
 M3U="$FIX/Virtua Fighter.m3u"
 if [[ ! -f "$M3U" ]]; then
   echo "FAIL: M3U not created: $M3U" >&2
@@ -42,7 +36,6 @@ if [[ ! -f "$M3U" ]]; then
   exit 1
 fi
 
-# Expected order (sorted by parsed disc number)
 expected=$'Virtua Fighter (Disc 1).chd\nVirtua Fighter (Disc 2).chd'
 actual="$(tr -d '\r' < "$M3U")"
 

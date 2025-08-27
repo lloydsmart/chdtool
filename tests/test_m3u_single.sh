@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="$REPO_ROOT/chdtool.sh"   # <-- adjust if your script filename differs
+SCRIPT="${SCRIPT:-$REPO_ROOT/chdtool.sh}"   # <— CHANGED: allow override via env
 FIX="$(mktemp -d)"
 trap 'rm -rf "$FIX"' EXIT
 
@@ -12,10 +12,10 @@ export KEEP_ORIGINALS=true
 export LOG_DEST=console
 export LOG_LEVEL_THRESHOLD=DEBUG
 
-# 1) Create a single CHD file
+# 1) Single CHD
 touch "$FIX/Daytona USA (Disc 1).chd"
 
-# 2) Create a zip with only one disc entry (so expected_chds has just one)
+# 2) Zip with one entry
 (
   cd "$FIX"
   printf "" > "Daytona USA (Disc 1).cue"
@@ -23,10 +23,10 @@ touch "$FIX/Daytona USA (Disc 1).chd"
   rm -f "Daytona USA (Disc 1).cue"
 )
 
-# 3) Run the script
+# 3) Run
 bash "$SCRIPT" "$FIX"
 
-# 4) Assert NO M3U was created
+# 4) Assert NO M3U
 M3U="$FIX/Daytona USA.m3u"
 if [[ -f "$M3U" ]]; then
   echo "FAIL: Unexpected M3U created for single-disc set"
