@@ -666,11 +666,10 @@ validate_cue_file() {
     cue_basename="$(basename "$cue_file")"
     local missing=0
 
-    mapfile -t actual_files < <(find "$cuedir" -maxdepth 1 -type f -printf "%f\n")
     declare -A file_map
-    for f in "${actual_files[@]}"; do
-        file_map["${f,,}"]="$f"
-    done
+    while IFS= read -r -d '' f; do
+    file_map["${f,,}"]="$f"
+    done < <(find "$cuedir" -maxdepth 1 -type f -printf '%f\0')
 
     while IFS= read -r line; do
         if [[ "$line" =~ ^[[:space:]]*FILE[[:space:]]+\"([^\"]+)\" ]]; then
