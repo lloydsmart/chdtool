@@ -68,14 +68,32 @@ _detect_backend() {
 }
 LOG_BACKEND="$(_detect_backend)"
 
+# Mirror policy: auto (TTY only), 1 (always), 0 (never)
+LOG_TEE_CONSOLE="${LOG_TEE_CONSOLE:-auto}"
+
+__should_mirror_console() {
+  case "${LOG_TEE_CONSOLE}" in
+    1|true|yes) return 0 ;;
+    0|false|no) return 1 ;;
+    auto) [[ -t 1 ]] && return 0 || return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+__console_print() {
+  # $1=ts, $2=level, $3=message (may be multiline)
+  local ts="$1" lvl="$2" msg="$3"
+  while IFS= read -r line; do
+    printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" >&2
+  done <<< "$msg"
+}
+
 # Internal emitter: $1=LEVEL (INFO/WARN/ERROR/DEBUG), $2...=message
 _emit_log() {
   local lvl="$1"; shift || true
   local msg="${*:-}"
-  local ts
-  ts="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  local ts; ts="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
-  # Map to syslog priority
   local pri=info
   case "$lvl" in
     DEBUG) pri=debug ;;
@@ -86,28 +104,24 @@ _emit_log() {
 
   case "$LOG_BACKEND" in
     journald)
-      # Anyone can write to journald via systemd-cat (root only needed to read *all* logs)
-      # We include LEVEL as the first line so it's searchable in journal.
       {
         echo "LEVEL=$lvl"
-        # Emit message line-by-line for readability in `journalctl -t chdtool`
         echo "RUN_ID=$RUN_ID"
-        while IFS= read -r line; do
-          echo "$line"
-        done <<< "$msg"
+        while IFS= read -r line; do echo "$line"; done <<< "$msg"
       } | systemd-cat --priority="$pri" --identifier="$LOG_TAG"
+      __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
       ;;
     syslog)
-      # Anyone can send to syslog with logger
       while IFS= read -r line; do
         logger -p "user.$pri" -t "$LOG_TAG" -- "$lvl: $line"
       done <<< "$msg"
+      __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
       ;;
     file)
-      # Default to your existing ./logs/… path; no root needed there
       while IFS= read -r line; do
         printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" >> "$LOGFILE"
       done <<< "$msg"
+      __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
       ;;
     console|*)
       while IFS= read -r line; do
@@ -164,7 +178,7 @@ build_find_expr() {
     for ext in "${patterns[@]}"; do
         expr+=("-iname" "*.${ext}" "-o")
     done
-    unset 'expr[${#expr[@]}-1]'   # Remove trailing -o
+    unset "expr[${#expr[@]}-1]"   # Remove trailing -o
     echo "${expr[@]}"
 }
 
@@ -606,7 +620,7 @@ verify_chds() {
             local failure_reasons
             failure_reasons=$(echo "$verify_output" | grep -iE 'error|fail|invalid|corrupt' || true)
             log WARN "⚠️ Verification failed on first try for: $chd_path"
-            [[ -n "$failure_reasons" ]] && log DEBUG"   Failure details: $failure_reasons"
+            [[ -n "$failure_reasons" ]] && log DEBUG "   Failure details: $failure_reasons"
             log INFO "⏳ Retrying after delay..."
             sleep 2
 
@@ -619,7 +633,7 @@ verify_chds() {
                 failure_reasons=$(echo "$verify_output" | grep -iE 'error|fail|invalid|corrupt' || true)
                 failures=$((failures + 1))
                 log ERROR "❌ Verification failed on retry for: $chd_path — deleting"
-                [[ -n "$failure_reasons" ]] && log "   Failure details: $failure_reasons"
+                [[ -n "$failure_reasons" ]] && log DEBUG "   Failure details: $failure_reasons"
                 rm -f "$chd_path"
                 all_verified=false
                 break
@@ -932,7 +946,7 @@ fi
 if [[ "$RECURSIVE" == true ]]; then
     mapfile -t all_inputs < <(find "$INPUT_DIR" \( -path '*/.*' -prune \) -o -type f \( "${find_expr[@]}" \) -print)
 else
-    mapfile -t all_inputs < <(find "$INPUT_DIR" -maxdepth 1 -type f \( "${find_expr[@]}" \))
+    mapfile -t all_inputs < <(find "$INPUT_DIR" -maxdepth 1 -type f \( "${find_expr[@]}" \) -print)
 fi
 log INFO "🔎 Found ${#all_inputs[@]} inputs"
 
