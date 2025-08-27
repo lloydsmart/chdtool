@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   release:
@@ -15,6 +16,25 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Install git-cliff
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y git-cliff
+
+      # Generate release notes for this tag using cliff.toml (or .cliff.toml)
+      - name: Generate release notes
+        run: |
+          set -euxo pipefail
+          CONF="cliff.toml"
+          [ -f ".cliff.toml" ] && CONF=".cliff.toml"
+          git cliff --config "$CONF" --tag "${GITHUB_REF_NAME}" --strip header > CHANGELOG_RELEASE.md
+          echo "Preview (first 120 lines):"
+          sed -n '1,120p' CHANGELOG_RELEASE.md
 
       - name: Prepare artifacts
         run: |
@@ -23,7 +43,7 @@ jobs:
           chmod +x chdtool.sh || true
           cp chdtool.sh chdtool
 
-          # Package distributables
+          # Package distributables (uses the repo's current files at this tag)
           mkdir -p dist
           tar -czf "dist/chdtool-${GITHUB_REF_NAME}.tar.gz" chdtool README.md LICENSE CHANGELOG.md || true
           zip -j "dist/chdtool-${GITHUB_REF_NAME}.zip" chdtool README.md LICENSE CHANGELOG.md || true
@@ -31,10 +51,30 @@ jobs:
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          body_path: CHANGELOG_RELEASE.md
           files: |
             dist/*
             chdtool.sh
           draft: false
-          # If tag contains a hyphen (e.g., v1.0.0-rc.1), mark as prerelease
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Regenerate the full CHANGELOG.md (for main) and open a PR
+      - name: Regenerate full CHANGELOG.md (for main)
+        run: |
+          set -euxo pipefail
+          CONF="cliff.toml"
+          [ -f ".cliff.toml" ] && CONF=".cliff.toml"
+          git cliff --config "$CONF" -o CHANGELOG.md
+          git status --porcelain
+
+      - name: Open PR to update CHANGELOG.md on main
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore(changelog): update for ${{ github.ref_name }}"
+          branch: chore/update-changelog-${{ github.ref_name }}
+          title: "chore(changelog): update for ${{ github.ref_name }}"
+          body: "Automated regeneration of **CHANGELOG.md** for ${{ github.ref_name }}."
+          base: main

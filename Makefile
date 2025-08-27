@@ -21,3 +21,9 @@ test-m3u-single:
 
 clean:
 	@echo "Nothing to clean; tests use mktemp dirs."
+
+changelog:
+	git cliff --config .cliff.toml -o CHANGELOG.md
+
+changelog-tag:
+	git cliff --config .cliff.toml --tag $${TAG} --strip header > CHANGELOG_RELEASE.md
