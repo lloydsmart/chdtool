@@ -415,59 +415,63 @@ letter_to_num() {
 # Parse disc info from a base name (no extension).
 # On success, echoes "<base>|<disc_num>" and returns 0; else returns 1.
 parse_disc_info() {
-  local name="$1"
-  local name_norm; name_norm="$(normalize_for_parse "$name")"
+    local name="$1"
+    local name_norm; name_norm="$(normalize_for_parse "$name")"
 
-  # Pattern set 1: Disc/CD/Disk/GD(-ROM)? with optional separator or none:
-  # e.g., "Title Disc2", "Title (CD-2)", "Title [Disk02]", "Title GD-ROM 3", "Title Disc 01"
-  local re_core='([Dd]isc|[Cc][Dd]|[Dd]isk|[Gg][Dd](?:-[Rr][Oo][Mm])?)'
-  local re_num='([0-9]{1,3})'
-  local re_sep='[[:space:]]*[-_\.]?[[:space:]]*'
+    # Pattern set 1: Disc/CD/Disk/GD(-ROM)? with optional separator or none:
+    # e.g., "Title Disc2", "Title (CD-2)", "Title [Disk02]", "Title GD-ROM 3", "Title Disc 01"
+    # ERE (bash) has no (?: ). Keep groups simple and predictable.
+    local re_core='([Dd]isc|[Cc][Dd]|[Dd]isk|[Gg][Dd]|[Gg][Dd]-[Rr][Oo][Mm])'
+    local re_num='([0-9]{1,3})'
+    local re_sep='[[:space:]]*[-_.]?[[:space:]]*'
+    # For the compact/union pattern, keep it a single capturing group:
+    local re_label_union='([Dd]isc|[Cc][Dd]|[Dd]isk|[Gg][Dd]|[Gg][Dd]-[Rr][Oo][Mm]|[Vv]ol|[Vv]olume|[Pp]art|[Pp]t\.?)'
 
-  if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?$re_core$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
-    local base="${BASH_REMATCH[1]}"
-    local num="${BASH_REMATCH[3]}"   # (1=label,2=sep? depends on grouping; ensure index)
-    # Because of our grouping above, indexes are:
-    # 1=prefix, 2=label, 3=number, 4=tail
-    base="$(tidy_base "$base")"
-    [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
-  fi
 
-  # Pattern set 2: Vol/Volume, Part/Pt
-  if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([Vv]ol(?:ume)?|[Pp](?:art|t\.?))$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
-    local base="${BASH_REMATCH[1]}"
-    local num="${BASH_REMATCH[3]}"
-    base="$(tidy_base "$base")"
-    [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
-  fi
+    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?$re_core$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
+        local base="${BASH_REMATCH[1]}"
+        local num="${BASH_REMATCH[3]}"   # (1=label,2=sep? depends on grouping; ensure index)
+        # Because of our grouping above, indexes are:
+        # 1=prefix, 2=label, 3=number, 4=tail
+        base="$(tidy_base "$base")"
+        [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
+    fi
 
-  # Pattern set 3: Side A/B/C… (map letters → 1/2/3…)
-  if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([Ss]ide)[[:space:]]*([A-Za-z])\)?([[:space:]]*.*)?$ ]]; then
-    local base="${BASH_REMATCH[1]}"
-    local letter="${BASH_REMATCH[3]}"
-    local num; num="$(letter_to_num "$letter")" || num=""
-    base="$(tidy_base "$base")"
-    [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
-  fi
+    # Pattern set 2: Vol/Volume, Part/Pt
+    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([Vv]ol|[Vv]olume|[Pp]art|[Pp]t\.?)$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
+        local base="${BASH_REMATCH[1]}"
+        local num="${BASH_REMATCH[3]}"
+        base="$(tidy_base "$base")"
+        [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
+    fi
 
-  # Pattern set 4: "1 of 2" / "1/2"
-  if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([0-9]+)[[:space:]]*(?:of|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$ ]]; then
-    local base="${BASH_REMATCH[1]}"
-    local num="${BASH_REMATCH[2]}"
-    base="$(tidy_base "$base")"
-    [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
-  fi
+    # Pattern set 3: Side A/B/C… (map letters → 1/2/3…)
+    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([Ss]ide)[[:space:]]*([A-Za-z])\)?([[:space:]]*.*)?$ ]]; then
+        local base="${BASH_REMATCH[1]}"
+        local letter="${BASH_REMATCH[3]}"
+        local num; num="$(letter_to_num "$letter")" || num=""
+        base="$(tidy_base "$base")"
+        [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
+    fi
 
-  # Pattern set 5: compact forms WITHOUT spaces/brackets:
-  # "Title Disc02", "Title CD2", "Title Vol.2", "Title Pt.3"
-  if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*(?:$re_core|[Vv]ol(?:ume)?|[Pp](?:art|t\.?))$re_sep$re_num([[:space:]]*.*)?$ ]]; then
-    local base="${BASH_REMATCH[1]}"
-    local num="${BASH_REMATCH[3]}"
-    base="$(tidy_base "$base")"
-    [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
-  fi
+    # Pattern set 4: "1 of 2" / "1/2"
+    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([0-9]+)[[:space:]]*(?:of|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$ ]]; then
+        local base="${BASH_REMATCH[1]}"
+        local num="${BASH_REMATCH[2]}"
+        base="$(tidy_base "$base")"
+        [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
+    fi
 
-  return 1
+    # Pattern set 5: compact forms WITHOUT spaces/brackets:
+    # "Title Disc02", "Title CD2", "Title Vol.2", "Title Pt.3"
+    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*$re_label_union$re_sep$re_num([[:space:]]*.*)?$ ]]; then
+        local base="${BASH_REMATCH[1]}"
+        local num="${BASH_REMATCH[3]}"
+        base="$(tidy_base "$base")"
+        [[ -n "$base" && -n "$num" ]] && { echo "$base|$num"; return 0; }
+    fi
+
+    return 1
 }
 
 # Make a filename safe across Linux/macOS/Windows shares.
