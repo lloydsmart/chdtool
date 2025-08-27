@@ -333,7 +333,9 @@ _now_ms() {
     fi
 }
 
-# Parse chdman stderr, render single-line progress, pass through non-progress lines
+# Generic chdman progress filter
+# Use with: PHASE_DEFAULT="Converting" chdman createcd … | _chdman_progress_filter
+#        or: PHASE_DEFAULT="Verifying"  chdman verify … | _chdman_progress_filter
 _chdman_progress_filter() {
     # Always re-enable autowrap on exit/interrupt
     _restore_wrap() { _term_print "\033[?7h"; }
