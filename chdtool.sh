@@ -961,9 +961,13 @@ if [[ -z "${find_expr[*]:-}" ]]; then
 fi
 
 if [[ "$RECURSIVE" == true ]]; then
-    mapfile -t all_inputs < <(find "$INPUT_DIR" \( -path '*/.*' -prune \) -o -type f \( "${find_expr[@]}" \) -print)
+    mapfile -d '' -t all_inputs < <(
+        find "$INPUT_DIR" \( -path '*/.*' -prune \) -o -type f \( "${find_expr[@]}" \) -print0
+    )
 else
-    mapfile -t all_inputs < <(find "$INPUT_DIR" -maxdepth 1 -type f \( "${find_expr[@]}" \) -print)
+    mapfile -d '' -t all_inputs < <(
+        find "$INPUT_DIR" -maxdepth 1 -type f \( "${find_expr[@]}" \) -print0
+    )
 fi
 log INFO "🔎 Found ${#all_inputs[@]} inputs"
 
