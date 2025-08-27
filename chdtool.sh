@@ -632,7 +632,7 @@ verify_chds() {
         log INFO "🔎 Verifying: $chd_path"
         verify_output=$(chdman verify -i "$chd_path" 2>&1)
         verify_exit_code=$?
-        echo "$verify_output" | verify_output_log INFO
+        verify_output_log INFO <<< "$verify_output"
 
         if [[ $verify_exit_code -ne 0 ]] || ! echo "$verify_output" | grep -qi "verification successful"; then
             local failure_reasons
@@ -645,7 +645,7 @@ verify_chds() {
             log INFO "🔎 Verifying: $chd_path"
             verify_output=$(chdman verify -i "$chd_path" 2>&1)
             verify_exit_code=$?
-            echo "$verify_output" | verify_output_log INFO
+            verify_output_log INFO <<< "$verify_output"
 
             if [[ $verify_exit_code -ne 0 ]] || ! echo "$verify_output" | grep -qi "verification successful"; then
                 failure_reasons=$(echo "$verify_output" | grep -iE 'error|fail|invalid|corrupt' || true)
