@@ -25,21 +25,21 @@ while [[ $# -gt 0 ]]; do
         --recursive|-r)
             RECURSIVE=true; shift ;;
         -*)
-            echo "❌ Unknown option: $1"
-            echo "$USAGE"; exit 1 ;;
+            echo "❌ Unknown option: $1" >&2
+            echo "$USAGE" >&2; exit 1 ;;
         *)
             if [[ -z "$INPUT_DIR" ]]; then
                 INPUT_DIR="${1%/}" # Remove trailing slash
             else
-                echo "❌ Unexpected extra argument: $1"
-                echo "$USAGE"; exit 1
+                echo "❌ Unexpected extra argument: $1" >&2
+                echo "$USAGE" >&2; exit 1
             fi
             shift ;;
     esac
 done
 
 if [[ -z "$INPUT_DIR" ]]; then
-    echo "$USAGE"; exit 1
+    echo "$USAGE" >&2; exit 1
 fi
 
 mkdir -p logs
