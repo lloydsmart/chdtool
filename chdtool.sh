@@ -133,7 +133,7 @@ verify_output_log() {
   local lvl="${1:-INFO}"
   case "$lvl" in DEBUG|INFO|WARN|ERROR) shift || true ;; *) lvl="INFO" ;; esac
   while IFS= read -r line; do
-    log DEBUG "$lvl" "$line"
+    log "$lvl" "$line"
   done
 }
 
@@ -599,8 +599,8 @@ verify_chds() {
         if [[ $verify_exit_code -ne 0 ]] || ! echo "$verify_output" | grep -qi "verification successful"; then
             local failure_reasons
             failure_reasons=$(echo "$verify_output" | grep -iE 'error|fail|invalid|corrupt' || true)
-            log WARN"⚠️ Verification failed on first try for: $chd_path"
-            [[ -n "$failure_reasons" ]] && log "   Failure details: $failure_reasons"
+            log WARN "⚠️ Verification failed on first try for: $chd_path"
+            [[ -n "$failure_reasons" ]] && log DEBUG"   Failure details: $failure_reasons"
             log INFO "⏳ Retrying after delay..."
             sleep 2
 
@@ -748,7 +748,7 @@ convert_disc_file() {
             subcmd="createdvd"
             icon="📀"  # DVD
         else
-            log "⚠️ Detected DVD image but this chdman lacks 'createdvd'. Skipping: $file"
+            log WARN "⚠️ Detected DVD image but this chdman lacks 'createdvd'. Skipping: $file"
             failures=$((failures + 1))
             return 1
         fi
