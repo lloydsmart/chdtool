@@ -334,13 +334,12 @@ _now_ms() {
 }
 
 # Parse chdman stderr, render single-line progress, pass through non-progress lines
-# --- REPLACE your _chdman_progress_filter with this ---
 _chdman_progress_filter() {
     # Always re-enable autowrap on exit/interrupt
     _restore_wrap() { _term_print "\033[?7h"; }
     trap _restore_wrap INT TERM EXIT
 
-    local last_draw=0 phase="Compressing" ratio="" progress_active=0 ms
+    local last_draw=0 phase="${PHASE_DEFAULT:-Compressing}" ratio="" progress_active=0 ms
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ "$line" =~ ([0-9]+([.][0-9]+)?)%[[:space:]]*complete ]]; then
@@ -619,48 +618,85 @@ verify_chds() {
     local outdir="$1"; shift
     local chds=("$@")
     local all_verified=true
+
     for chd in "${chds[@]}"; do
         local chd_path="$outdir/$chd"
         if [[ ! -f "$chd_path" ]]; then
             all_verified=false
             break
         fi
-        local verify_output
-        local verify_exit_code
+
+        local verify_exit_code=0
+        local tmpout
+        tmpout="$(mktemp -t chdverify_XXXXXX)"
 
         log INFO "🔎 Verifying: $chd_path"
-        verify_output=$(chdman verify -i "$chd_path" 2>&1)
-        verify_exit_code=$?
-        verify_output_log INFO <<< "$verify_output"
+        if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
+            # TTY: show single-line progress, capture full output to tmp for analysis
+            if PHASE_DEFAULT="Verifying" "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 \
+                | tee "$tmpout" \
+                | _chdman_progress_filter
+            then
+                verify_exit_code=0
+            else
+                verify_exit_code=$?
+            fi
+        else
+            # Non-TTY: no progress UI, still capture output
+            if "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 | tee "$tmpout" >/dev/null
+            then
+                verify_exit_code=0
+            else
+                verify_exit_code=$?
+            fi
+        fi
 
-        if [[ $verify_exit_code -ne 0 ]] || ! echo "$verify_output" | grep -qi "verification successful"; then
+        if [[ $verify_exit_code -ne 0 ]]; then
+            # Summarize failure reasons (quietly)
             local failure_reasons
-            failure_reasons=$(echo "$verify_output" | grep -iE 'error|fail|invalid|corrupt' || true)
-            log WARN "⚠️ Verification failed on first try for: $chd_path"
+            failure_reasons="$(grep -iE 'error|fail|invalid|corrupt' "$tmpout" || true)"
             [[ -n "$failure_reasons" ]] && log DEBUG "   Failure details: $failure_reasons"
+
+            log WARN "⚠️ Verification failed on first try for: $chd_path"
             log INFO "⏳ Retrying after delay..."
             sleep 2
 
+            # Retry with a fresh capture file
+            : > "$tmpout"
             log INFO "🔎 Verifying: $chd_path"
-            verify_output=$(chdman verify -i "$chd_path" 2>&1)
-            verify_exit_code=$?
-            verify_output_log INFO <<< "$verify_output"
-
-            if [[ $verify_exit_code -ne 0 ]] || ! echo "$verify_output" | grep -qi "verification successful"; then
-                failure_reasons=$(echo "$verify_output" | grep -iE 'error|fail|invalid|corrupt' || true)
-                failures=$((failures + 1))
-                log ERROR "❌ Verification failed on retry for: $chd_path — deleting"
-                [[ -n "$failure_reasons" ]] && log DEBUG "   Failure details: $failure_reasons"
-                rm -f "$chd_path"
-                all_verified=false
-                break
+            if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
+                if PHASE_DEFAULT="Verifying" "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 \
+                    | tee "$tmpout" \
+                    | _chdman_progress_filter
+                then
+                    log INFO "✅ Verified on retry: $chd_path"
+                    rm -f -- "$tmpout"
+                    continue
+                fi
             else
-                log INFO "✅ Verified on retry: $chd_path"
+                if "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 | tee "$tmpout" >/dev/null
+                then
+                    log INFO "✅ Verified on retry: $chd_path"
+                    rm -f -- "$tmpout"
+                    continue
+                fi
             fi
+
+            # Still failed: log concise reasons and clean up
+            failure_reasons="$(grep -iE 'error|fail|invalid|corrupt' "$tmpout" || true)"
+            [[ -n "$failure_reasons" ]] && log DEBUG "   Failure details: $failure_reasons"
+            failures=$((failures + 1))
+            log ERROR "❌ Verification failed on retry for: $chd_path — deleting"
+            rm -f -- "$chd_path"
+            rm -f -- "$tmpout"
+            all_verified=false
+            break
         else
             log INFO "✅ Verified CHD: $chd_path"
+            rm -f -- "$tmpout"
         fi
     done
+
     $all_verified && return 0 || return 1
 }
 
@@ -795,9 +831,16 @@ convert_disc_file() {
 
     log INFO "$icon Detected $disc_type image → using chdman $subcmd"
     log INFO "🔧 Converting: $file -> $tmp_chd"
-    if ! run_chdman_progress "$subcmd" -i "$file" -o "$tmp_chd"; then
-        log ERROR "❌ chdman $subcmd failed for: $file"
-    return 1
+    if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
+        if ! PHASE_DEFAULT="Converting" "${CHDMAN_BIN:-chdman}" "$subcmd" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
+            log ERROR "❌ chdman $subcmd failed for: $file"
+            return 1
+        fi
+    else
+        if ! "${CHDMAN_BIN:-chdman}" "$subcmd" -i "$file" -o "$tmp_chd"; then
+            log ERROR "❌ chdman $subcmd failed for: $file"
+            return 1
+        fi
     fi
 
     return 0
