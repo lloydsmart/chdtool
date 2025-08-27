@@ -819,13 +819,14 @@ process_input() {
     ext_regex="$(build_ext_regex "${disc_exts[@]}")"
     local temp_dir=""
 
-    local _cleanup() {
-        if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
-            rm -rf "$temp_dir"
-            log INFO "🧹 Cleaned up temp dir: $temp_dir"
-        fi
+    _cleanup() {
+    if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
+        rm -rf -- "$temp_dir"
+        log INFO "🧹 Cleaned up temp dir: $temp_dir"
+    fi
     }
-    trap _cleanup RETURN  # runs on any return/exit from this function
+    # One-shot RETURN trap: runs once when this function returns, then unsets itself
+    trap '_cleanup; trap - RETURN' RETURN
 
     if is_in_list "$ext" "${archive_exts[@]}"; then
         archives_processed=$((archives_processed + 1))
@@ -947,12 +948,6 @@ process_input() {
         chd_base="$(basename "${expected_chds[0]}" .chd)"
         log DEBUG "🔤 Raw base name: $chd_base"
         maybe_generate_m3u_for "$chd_base" "$outdir"
-    fi
-
-    # Per-iteration temp cleanup
-    if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
-        rm -rf "$temp_dir"
-        log INFO "🧹 Cleaned up temp dir: $temp_dir"
     fi
 
     return 0
