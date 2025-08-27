@@ -166,14 +166,6 @@ log() {
 log INFO "🚀 Script started, input dir: $INPUT_DIR"
 [[ "$RECURSIVE" == true ]] && log INFO "📂 Recursive mode enabled — scanning subdirectories"
 
-verify_output_log() {
-  local lvl="${1:-INFO}"
-  case "$lvl" in DEBUG|INFO|WARN|ERROR) shift || true ;; *) lvl="INFO" ;; esac
-  while IFS= read -r line; do
-    log "$lvl" "$line"
-  done
-}
-
 is_in_list() {
   local needle="$1"; shift
   local x
@@ -274,7 +266,6 @@ _repeat_char() { local n=$1 c=$2 out=""; while (( n-- > 0 )); do out+="$c"; done
 
 # Draw a single-line status (bar or line) to stderr, staying on one row.
 PROGRESS_BAR_MAX=${PROGRESS_BAR_MAX:-40}
-PROGRESS_FUDGE=${PROGRESS_FUDGE:-8}   # extra safety to prevent wrap with wide glyphs
 
 _term_print() {
   if [[ -t 2 && -w /dev/tty ]]; then
