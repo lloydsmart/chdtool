@@ -873,7 +873,7 @@ process_input() {
         esac
 
         read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
-        mapfile -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \))
+        mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
 
         if [[ ${#disc_files[@]} -eq 0 && ${#archive_entries[@]} -gt 0 ]]; then
             for entry in "${archive_entries[@]}"; do
