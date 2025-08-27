@@ -611,6 +611,14 @@ cleanup_all() {
       [[ -n "$d" && -d "$d" ]] && rm -rf -- "$d" && log INFO "🧹 Cleaned up temp dir: $d"
     done
   fi
+
+  # Remove any lingering .tmp files in the working directory tree
+  if [[ -n "$INPUT_DIR" && -d "$INPUT_DIR" ]]; then
+    while IFS= read -r -d '' f; do
+      rm -f -- "$f"
+      log INFO "🗑️ Removed leftover tmp file: $f"
+    done < <(find "$INPUT_DIR" -type f -name '*.tmp' -print0)
+  fi
 }
 
 _on_interrupt() {
