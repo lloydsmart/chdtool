@@ -356,7 +356,7 @@ _chdman_progress_filter() {
 # Wrapper to run chdman with a clean one-line progress display.
 # Usage: run_chdman_progress createcd -i "$in" -o "$out"
 run_chdman_progress() {
-    local last_draw=0 phase="Compressing" ratio="" progress_active=0 ms
+    # local last_draw=0 phase="Compressing" ratio="" progress_active=0 ms
     local bin="${CHDMAN_BIN:-chdman}"
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
         "$bin" "$@" 2>&1 | _chdman_progress_filter
@@ -961,9 +961,9 @@ log INFO "📊 Summary:"
 if [[ $total_original_size -gt 0 ]]; then
     total_saved=$((total_original_size - total_chd_size))
     total_percent=$((100 * total_saved / total_original_size))
-    log INFO "📦 Total original size: $(human_readable $total_original_size)"
-    log INFO "💿 Total CHD size: $(human_readable $total_chd_size)"
-    log INFO "📉 Total space saved: $(human_readable $total_saved) (${total_percent}%)"
+    log INFO "📦 Total original size: $(human_readable "$total_original_size")"
+    log INFO "💿 Total CHD size: $(human_readable "$total_chd_size")"
+    log INFO "📉 Total space saved: $(human_readable "$total_saved") (${total_percent}%)"
 fi
 log INFO "📦 Archives processed: $archives_processed"
 log INFO "💿 CHDs created:       $chds_created"
