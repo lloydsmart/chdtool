@@ -126,14 +126,14 @@ log() {
   _emit_log "$lvl" "$*"
 }
 
-log "🚀 Script started, input dir: $INPUT_DIR"
-[[ "$RECURSIVE" == true ]] && log "📂 Recursive mode enabled — scanning subdirectories"
+log INFO "🚀 Script started, input dir: $INPUT_DIR"
+[[ "$RECURSIVE" == true ]] && log INFO "📂 Recursive mode enabled — scanning subdirectories"
 
 verify_output_log() {
   local lvl="${1:-INFO}"
   case "$lvl" in DEBUG|INFO|WARN|ERROR) shift || true ;; *) lvl="INFO" ;; esac
   while IFS= read -r line; do
-    log "$lvl" "$line"
+    log DEBUG "$lvl" "$line"
   done
 }
 
@@ -172,19 +172,19 @@ build_ext_regex() {
 
 for cmd in "${required_commands[@]}"; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
-        log "❌ Error: Required command '$cmd' not found. Please install it and ensure it's in your PATH."
+        log ERROR "❌ Error: Required command '$cmd' not found. Please install it and ensure it's in your PATH."
         exit 1
     fi
 done
 
 chdman_version="$(chdman --help 2>&1 | head -n 1 || true)"
-log "ℹ️ Using $chdman_version"
+log INFO "ℹ️ Using $chdman_version"
 # Detect 'createdvd' capability (newer chdman versions)
 CHDMAN_HAS_CREATEDVD=false
 if chdman -help 2>&1 | grep -qiE '(^|[[:space:]])createdvd([[:space:]]|$)'; then
     CHDMAN_HAS_CREATEDVD=true
 fi
-log "ℹ️ chdman createdvd support: $CHDMAN_HAS_CREATEDVD"
+log DEBUG "ℹ️ chdman createdvd support: $CHDMAN_HAS_CREATEDVD"
 
 
 total_original_size=0
@@ -515,7 +515,7 @@ generate_m3u_for_base() {
     done < <(find "$outdir" -maxdepth 1 -type f -iname "*.chd" -print0)
 
     if (( ${#members[@]} < 2 )); then
-        log "ℹ️ Not generating M3U - fewer than two CHDs found for base: $base"
+        log DEBUG "ℹ️ Not generating M3U - fewer than two CHDs found for base: $base"
         return 0
     fi
 
@@ -539,7 +539,7 @@ generate_m3u_for_base() {
     # migrate legacy → sanitized (only if sanitized doesn't exist yet)
     if [[ -f "$legacy_path" && ! -f "$m3u_path" ]]; then
         mv -f "$legacy_path" "$m3u_path"
-        log "🧹 Renamed legacy M3U → sanitized: $(basename "$legacy_path") → $(basename "$m3u_path")"
+        log INFO "🧹 Renamed legacy M3U → sanitized: $(basename "$legacy_path") → $(basename "$m3u_path")"
     fi
 
     local tmp_m3u="$m3u_path.tmp"
@@ -549,16 +549,16 @@ generate_m3u_for_base() {
     done
     if [[ -f "$m3u_path" ]] && cmp -s "$tmp_m3u" "$m3u_path"; then
         rm -f "$tmp_m3u"
-        log "🧾 M3U up-to-date: $m3u_path"
+        log INFO "🧾 M3U up-to-date: $m3u_path"
     else
         # Remember pre-move existence to log Created vs Updated correctly
         local _m3u_existed=false
         [[ -f "$m3u_path" ]] && _m3u_existed=true
         mv -f "$tmp_m3u" "$m3u_path"
         if [[ "$_m3u_existed" == true ]]; then
-            log "📝 Updated M3U: $m3u_path"
+            log INFO "📝 Updated M3U: $m3u_path"
         else
-            log "🆕 Created M3U: $m3u_path"
+            log INFO "🆕 Created M3U: $m3u_path"
         fi
     fi
 }
@@ -569,11 +569,11 @@ maybe_generate_m3u_for() {
     local outdir="$2"     # directory where CHDs live
     local parsed
     if ! parsed="$(parse_disc_info "$chd_base")"; then
-        log "ℹ️ Not generating M3U - CHD not part of multi-disc set: $chd_base"
+        log DEBUG "ℹ️ Not generating M3U - CHD not part of multi-disc set: $chd_base"
         return 0
     fi
     local base="${parsed%%|*}"
-    log "🔎 M3U check — base: $base"
+    log DEBUG "🔎 M3U check — base: $base"
     generate_m3u_for_base "$outdir" "$base"
 }
 # ---------- end M3U helpers ----------
@@ -591,7 +591,7 @@ verify_chds() {
         local verify_output
         local verify_exit_code
 
-        log "🔎 Verifying: $chd_path"
+        log INFO "🔎 Verifying: $chd_path"
         verify_output=$(chdman verify -i "$chd_path" 2>&1)
         verify_exit_code=$?
         echo "$verify_output" | verify_output_log
@@ -599,12 +599,12 @@ verify_chds() {
         if [[ $verify_exit_code -ne 0 ]] || ! echo "$verify_output" | grep -qi "verification successful"; then
             local failure_reasons
             failure_reasons=$(echo "$verify_output" | grep -iE 'error|fail|invalid|corrupt' || true)
-            log "⚠️ Verification failed on first try for: $chd_path"
+            log WARNING"⚠️ Verification failed on first try for: $chd_path"
             [[ -n "$failure_reasons" ]] && log "   Failure details: $failure_reasons"
-            log "⏳ Retrying after delay..."
+            log INFO "⏳ Retrying after delay..."
             sleep 2
 
-            log "🔎 Verifying: $chd_path"
+            log INFO "🔎 Verifying: $chd_path"
             verify_output=$(chdman verify -i "$chd_path" 2>&1)
             verify_exit_code=$?
             echo "$verify_output" | verify_output_log
@@ -612,16 +612,16 @@ verify_chds() {
             if [[ $verify_exit_code -ne 0 ]] || ! echo "$verify_output" | grep -qi "verification successful"; then
                 failure_reasons=$(echo "$verify_output" | grep -iE 'error|fail|invalid|corrupt' || true)
                 failures=$((failures + 1))
-                log "❌ Verification failed on retry for: $chd_path — deleting"
+                log ERROR "❌ Verification failed on retry for: $chd_path — deleting"
                 [[ -n "$failure_reasons" ]] && log "   Failure details: $failure_reasons"
                 rm -f "$chd_path"
                 all_verified=false
                 break
             else
-                log "✅ Verified on retry: $chd_path"
+                log INFO "✅ Verified on retry: $chd_path"
             fi
         else
-            log "✅ Verified CHD: $chd_path"
+            log INFO "✅ Verified CHD: $chd_path"
         fi
     done
     $all_verified && return 0 || return 1
@@ -651,14 +651,14 @@ validate_cue_file() {
             [[ "$ref_lower" == "${cue_basename,,}" ]] && continue
 
             if [[ "$ref_lower" == *.mp3 || "$ref_lower" == *.wav ]]; then
-                log "⚠️ CUE file references unsupported audio format: $ref_basename"
+                log WARNING "⚠️ CUE file references unsupported audio format: $ref_basename"
             fi
             if [[ "$ref_norm" == /* || "$ref_norm" == *".."* ]]; then
-                log "⚠️ Skipping unsafe external path in CUE: $ref_basename"
+                log WARNING "⚠️ Skipping unsafe external path in CUE: $ref_basename"
                 continue
             fi
             if [[ -z "${file_map["$ref_lower"]:-}" ]]; then
-                log "❌ Missing referenced file in CUE: $ref_basename (required by $cue_file)"
+                log ERROR "❌ Missing referenced file in CUE: $ref_basename (required by $cue_file)"
                 missing=1
             fi
         fi
@@ -716,7 +716,7 @@ convert_disc_file() {
     # If it's a CUE, validate referenced files first
     if [[ "${file,,}" == *.cue ]]; then
         if ! validate_cue_file "$file"; then
-            log "❌ Missing referenced file in CUE: $file"
+            log ERROR "❌ Missing referenced file in CUE: $file"
             return 1
         fi
     fi
@@ -728,13 +728,13 @@ convert_disc_file() {
 
     # If a CHD already exists, verify it and skip if good
     if [[ -f "$chd_path" ]]; then
-        log "🔎 Verifying existing CHD before conversion: $chd_path"
+        log INFO "🔎 Verifying existing CHD before conversion: $chd_path"
         if verify_chds "$outdir" "$base.chd"; then
-            log "✅ Existing CHD verified, skipping conversion: $chd_path"
+            log INFO "✅ Existing CHD verified, skipping conversion: $chd_path"
             return 0
         else
             failures=$((failures + 1))
-            log "❌ Existing CHD verification failed, will convert and replace"
+            log WARNING "❌ Existing CHD verification failed, will convert and replace"
         fi
     fi
 
@@ -757,10 +757,10 @@ convert_disc_file() {
         icon="💿"      # CD
     fi
 
-    log "$icon Detected $disc_type image → using chdman $subcmd"
-    log "🔧 Converting: $file -> $tmp_chd"
+    log INFO "$icon Detected $disc_type image → using chdman $subcmd"
+    log INFO "🔧 Converting: $file -> $tmp_chd"
     if ! run_chdman_progress "$subcmd" -i "$file" -o "$tmp_chd"; then
-        log "❌ chdman $subcmd failed for: $file"
+        log ERROR "❌ chdman $subcmd failed for: $file"
     return 1
     fi
 
@@ -801,24 +801,24 @@ process_input() {
     fi
 
     if [[ ${#expected_chds[@]} -eq 0 ]]; then
-        log "⏭️ Skipping $input_file - no disc files found (not a supported archive or disc format)"
+        log WARNING "⏭️ Skipping $input_file - no disc files found (not a supported archive or disc format)"
         return 0
     fi
 
     # If all expected CHDs already exist and verify, remove original and done
     if verify_chds "$outdir" "${expected_chds[@]}"; then
-        log "✅ All expected CHDs verified for $input_file"
+        log INFO "✅ All expected CHDs verified for $input_file"
         if [[ "$KEEP_ORIGINALS" != true ]]; then
-            log "🗑️ Removing original input file: $input_file"
+            log INFO "🗑️ Removing original input file: $input_file"
             rm -f "$input_file"
         else
-            log "📦 Keeping original input file due to KEEP_ORIGINALS=true"
+            log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
         fi
         # Per-iteration M3U generation for already-present sets
         if [[ ${#expected_chds[@]} -gt 0 ]]; then
             local chd_base
             chd_base="$(basename "${expected_chds[0]}" .chd)"
-            log "🔤 Raw base name: $chd_base"
+            log DEBUG "🔤 Raw base name: $chd_base"
             maybe_generate_m3u_for "$chd_base" "$outdir"
         fi
         return 0
@@ -828,7 +828,7 @@ process_input() {
     if is_in_list "$ext" "${archive_exts[@]}"; then
         local temp_dir
         temp_dir="$(mktemp -d -t "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
-        log "📦 Extracting $input_file to $temp_dir"
+        log INFO "📦 Extracting $input_file to $temp_dir"
         case "$ext" in
             zip) unzip -qq "$input_file" -d "$temp_dir" ;;
             rar) unrar x -o+ "$input_file" "$temp_dir" >/dev/null ;;
@@ -863,15 +863,15 @@ process_input() {
             for tmp_chd in "${tmp_chds[@]}"; do
                 local final_chd="${tmp_chd%.tmp}"
                 mv -f "$tmp_chd" "$final_chd"
-                log "🔄 Replaced old CHD with new verified CHD: $final_chd"
+                log INFO "🔄 Replaced old CHD with new verified CHD: $final_chd"
                 chds_created=$((chds_created + 1))
             done
 
             if [[ "$KEEP_ORIGINALS" != true ]]; then
-                log "🗑️ Removing original input file: $input_file"
+                log INFO "🗑️ Removing original input file: $input_file"
                 rm -f "$input_file"
             else
-                log "📦 Keeping original input file due to KEEP_ORIGINALS=true"
+                log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
             fi
 
             for chd in "${expected_chds[@]}"; do
@@ -882,7 +882,7 @@ process_input() {
             if [[ $archive_size_bytes -gt 0 ]]; then
                 local saving=$((archive_size_bytes - archive_chd_size))
                 local saving_percent=$((100 * saving / archive_size_bytes))
-                log "📉 Space saving for $(basename "$input_file"): $(human_readable "$archive_size_bytes") → $(human_readable "$archive_chd_size"), saved $(human_readable "$saving") (${saving_percent}%)"
+                log INFO "📉 Space saving for $(basename "$input_file"): $(human_readable "$archive_size_bytes") → $(human_readable "$archive_chd_size"), saved $(human_readable "$saving") (${saving_percent}%)"
                 total_original_size=$((total_original_size + archive_size_bytes))
                 total_chd_size=$((total_chd_size + archive_chd_size))
             fi
@@ -890,11 +890,11 @@ process_input() {
             for tmp_chd in "${tmp_chds[@]}"; do
                 if [[ -f "$tmp_chd" ]]; then
                     rm -f "$tmp_chd"
-                    log "🗑️ Removed failed tmp CHD: $tmp_chd"
+                    log INFO "🗑️ Removed failed tmp CHD: $tmp_chd"
                 fi
             done
             failures=$((failures + 1))
-            log "⚠️ CHD verification failed after conversion for $input_file, keeping original"
+            log WARNING "⚠️ CHD verification failed after conversion for $input_file, keeping original"
         fi
     fi
 
@@ -902,14 +902,14 @@ process_input() {
     if [[ ${#expected_chds[@]} -gt 0 ]]; then
         local chd_base
         chd_base="$(basename "${expected_chds[0]}" .chd)"
-        log "🔤 Raw base name: $chd_base"
+        log DEBUG "🔤 Raw base name: $chd_base"
         maybe_generate_m3u_for "$chd_base" "$outdir"
     fi
 
     # Per-iteration temp cleanup
     if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
         rm -rf "$temp_dir"
-        log "🧹 Cleaned up temp dir: $temp_dir"
+        log INFO "🧹 Cleaned up temp dir: $temp_dir"
     fi
 
     return 0
@@ -919,7 +919,7 @@ process_input() {
 read -r -a find_expr <<< "$(build_find_expr "${all_exts[@]}")"
 
 if [[ -z "${find_expr[*]:-}" ]]; then
-    log "⚠️ No valid file extensions found for searching, exiting."
+    log ERROR "⚠️ No valid file extensions found for searching, exiting."
     exit 1
 fi
 
@@ -928,25 +928,25 @@ if [[ "$RECURSIVE" == true ]]; then
 else
     mapfile -t all_inputs < <(find "$INPUT_DIR" -maxdepth 1 -type f \( "${find_expr[@]}" \))
 fi
-log "🔎 Found ${#all_inputs[@]} inputs"
+log INFO "🔎 Found ${#all_inputs[@]} inputs"
 
 for input in "${all_inputs[@]}"; do
-    log "▶️ Processing file: $input"
+    log INFO "▶️ Processing file: $input"
     if ! process_input "$input"; then
-        log "⚠️ Failed to process $input"
+        log ERROR "⚠️ Failed to process $input"
     fi
 done
 
-log "📊 Summary:"
+log INFO "📊 Summary:"
 if [[ $total_original_size -gt 0 ]]; then
     total_saved=$((total_original_size - total_chd_size))
     total_percent=$((100 * total_saved / total_original_size))
-    log "📦 Total original size: $(human_readable $total_original_size)"
-    log "💿 Total CHD size: $(human_readable $total_chd_size)"
-    log "📉 Total space saved: $(human_readable $total_saved) (${total_percent}%)"
+    log INFO "📦 Total original size: $(human_readable $total_original_size)"
+    log INFO "💿 Total CHD size: $(human_readable $total_chd_size)"
+    log INFO "📉 Total space saved: $(human_readable $total_saved) (${total_percent}%)"
 fi
-log "📦 Archives processed: $archives_processed"
-log "💿 CHDs created:       $chds_created"
-log "❌ Failures:           $failures"
-log "⏱️ Elapsed time: $(format_duration $(( $(date +%s) - script_start_time )))"
-log "✅ Done!"
+log INFO "📦 Archives processed: $archives_processed"
+log INFO "💿 CHDs created:       $chds_created"
+log INFO "❌ Failures:           $failures"
+log INFO "⏱️ Elapsed time: $(format_duration $(( $(date +%s) - script_start_time )))"
+log INFO "✅ Done!"
