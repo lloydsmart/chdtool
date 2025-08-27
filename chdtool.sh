@@ -267,7 +267,6 @@ get_file_size() {
 # Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
 PROGRESS_STYLE_DEFAULT="auto"
 PROGRESS_THROTTLE_MS=250   # reduce flicker
-PROGRESS_BAR_MAX=40        # hard cap so we don't get too wide
 PROGRESS_MARGIN=28         # spare columns to avoid wrap (emoji-width safety)
 
 # Print N copies of a char
