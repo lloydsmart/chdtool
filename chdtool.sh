@@ -599,7 +599,7 @@ verify_chds() {
         if [[ $verify_exit_code -ne 0 ]] || ! echo "$verify_output" | grep -qi "verification successful"; then
             local failure_reasons
             failure_reasons=$(echo "$verify_output" | grep -iE 'error|fail|invalid|corrupt' || true)
-            log WARNING"⚠️ Verification failed on first try for: $chd_path"
+            log WARN"⚠️ Verification failed on first try for: $chd_path"
             [[ -n "$failure_reasons" ]] && log "   Failure details: $failure_reasons"
             log INFO "⏳ Retrying after delay..."
             sleep 2
@@ -651,10 +651,10 @@ validate_cue_file() {
             [[ "$ref_lower" == "${cue_basename,,}" ]] && continue
 
             if [[ "$ref_lower" == *.mp3 || "$ref_lower" == *.wav ]]; then
-                log WARNING "⚠️ CUE file references unsupported audio format: $ref_basename"
+                log WARN "⚠️ CUE file references unsupported audio format: $ref_basename"
             fi
             if [[ "$ref_norm" == /* || "$ref_norm" == *".."* ]]; then
-                log WARNING "⚠️ Skipping unsafe external path in CUE: $ref_basename"
+                log WARN "⚠️ Skipping unsafe external path in CUE: $ref_basename"
                 continue
             fi
             if [[ -z "${file_map["$ref_lower"]:-}" ]]; then
@@ -734,7 +734,7 @@ convert_disc_file() {
             return 0
         else
             failures=$((failures + 1))
-            log WARNING "❌ Existing CHD verification failed, will convert and replace"
+            log WARN "❌ Existing CHD verification failed, will convert and replace"
         fi
     fi
 
@@ -801,7 +801,7 @@ process_input() {
     fi
 
     if [[ ${#expected_chds[@]} -eq 0 ]]; then
-        log WARNING "⏭️ Skipping $input_file - no disc files found (not a supported archive or disc format)"
+        log WARN "⏭️ Skipping $input_file - no disc files found (not a supported archive or disc format)"
         return 0
     fi
 
@@ -894,7 +894,7 @@ process_input() {
                 fi
             done
             failures=$((failures + 1))
-            log WARNING "⚠️ CHD verification failed after conversion for $input_file, keeping original"
+            log WARN "⚠️ CHD verification failed after conversion for $input_file, keeping original"
         fi
     fi
 
