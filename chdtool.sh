@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 set +H
 script_start_time=$(date +%s)
 shopt -s nullglob
@@ -824,8 +824,8 @@ process_input() {
         log INFO "🧹 Cleaned up temp dir: $temp_dir"
     fi
     }
-    # One-shot RETURN trap: runs once when this function returns, then unsets itself
-    trap '_cleanup; trap - RETURN' RETURN
+    # One-shot traps: cleanup on normal return and on error; clear both on return.
+    trap '_cleanup; trap - RETURN; trap - ERR' RETURN ERR
 
     if is_in_list "$ext" "${archive_exts[@]}"; then
         archives_processed=$((archives_processed + 1))
