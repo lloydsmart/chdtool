@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Minimal stub to satisfy your script in CI
+
+case "$1" in
+  --help|-help)
+    echo "chdman 0.000 (stub) - createdvd createcd verify"; exit 0
+    ;;
+  verify)
+    # your script greps for "complete" and optionally "(ratio=..%)"
+    echo "Verifying, 100% complete (ratio=50%)" >&2
+    exit 0
+    ;;
+  createcd|createdvd)
+    # not used in the test; if called, fail fast so we notice
+    echo "stub chdman: create not supported in test" >&2
+    exit 2
+    ;;
+  *)
+    echo "stub chdman: unknown args: $*" >&2
+    exit 1
+    ;;
+esac

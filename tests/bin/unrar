@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Test stub: your CI tests don't use .rar, so this only satisfies `command -v unrar`.
+# If something accidentally calls it, fail fast so we notice.
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  lb)  # "list" used by the script; safe to output nothing and succeed
+       exit 0 ;;
+  x)   echo "stub unrar: extract not supported in tests" >&2; exit 2 ;;
+  *)   echo "stub unrar: unsupported cmd '$cmd' in tests" >&2; exit 2 ;;
+esac
