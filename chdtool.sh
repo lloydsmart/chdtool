@@ -345,10 +345,10 @@ _chdman_progress_filter() {
     local last_draw=0 phase="Compressing" ratio="" progress_active=0 ms
 
     while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ "$line" =~ ([0-9]+([.][0-9])?)%[[:space:]]*complete ]]; then
+        if [[ "$line" =~ ([0-9]+([.][0-9]+)?)%[[:space:]]*complete ]]; then
             local pct="${BASH_REMATCH[1]}"
             [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
-            if [[ "$line" =~ \(ratio=([0-9]+([.][0-9])?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
+            if [[ "$line" =~ \(ratio=([0-9]+([.][0-9]+)?)%\) ]]; then ratio="${BASH_REMATCH[1]}"; else ratio=""; fi
 
             ms="$(_now_ms)"
             if (( ms - last_draw >= PROGRESS_THROTTLE_MS )); then
