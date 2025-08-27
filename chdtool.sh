@@ -608,17 +608,27 @@ cleanup_all() {
   # Remove any temp dirs that might still exist
   if ((${#TEMP_DIRS[@]})); then
     for d in "${TEMP_DIRS[@]}"; do
-      [[ -n "$d" && -d "$d" ]] && rm -rf -- "$d" && log INFO "🧹 Cleaned up temp dir: $d"
+      if [[ -n "$d" && -d "$d" ]]; then
+        rm -rf -- "$d"
+        log INFO "🧹 Cleaned up temp dir: $d"
+      fi
     done
   fi
 
-  # Remove any lingering .tmp files in the working directory tree
+  # Remove our known temp files in the working directory tree
   if [[ -n "$INPUT_DIR" && -d "$INPUT_DIR" ]]; then
     while IFS= read -r -d '' f; do
       rm -f -- "$f"
       log INFO "🗑️ Removed leftover tmp file: $f"
-    done < <(find "$INPUT_DIR" -type f -name '*.tmp' -print0)
+    done < <(find "$INPUT_DIR" -type f \( -name '*.chd.tmp' -o -name '*.m3u.tmp' \) -print0)
   fi
+
+  # Remove verify scratch files in /tmp that match our mktemp prefix
+  # (mktemp -t chdverify_XXXXXX => /tmp/chdverify_*)
+  while IFS= read -r -d '' f; do
+    rm -f -- "$f"
+    log INFO "🗑️ Removed verify scratch: $f"
+  done < <(find /tmp -maxdepth 1 -type f -name 'chdverify_*' -print0 2>/dev/null || true)
 }
 
 _on_interrupt() {
