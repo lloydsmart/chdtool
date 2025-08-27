@@ -11,6 +11,7 @@ KEEP_ORIGINALS=false
 RECURSIVE=false
 INPUT_DIR=""
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
+CHDMAN_MSG_LEVEL="${CHDMAN_MSG_LEVEL:-DEBUG}"
     
 # Manual parsing to support long options
 while [[ $# -gt 0 ]]; do
@@ -51,9 +52,9 @@ LOG_TAG="${LOG_TAG:-chdtool}"
 _detect_backend() {
   case "$LOG_DEST" in
     journald) echo journald ;;
-    syslog)   echo syslog ;;
-    file)     echo file ;;
-    console)  echo console ;;
+    syslog)   echo syslog   ;;
+    file)     echo file     ;;
+    console)  echo console  ;;
     auto)
       if [[ -S /run/systemd/journal/socket ]] && command -v systemd-cat >/dev/null 2>&1; then
         echo journald
@@ -67,6 +68,16 @@ _detect_backend() {
   esac
 }
 LOG_BACKEND="$(_detect_backend)"
+
+# add RUN_ID tag only for journald/syslog
+if [[ "$LOG_BACKEND" == journald || "$LOG_BACKEND" == syslog ]]; then
+  LOG_TAG="${LOG_TAG}[${RUN_ID}]"
+fi
+
+# ensure the logfile directory exists when we write to a file (console tees to file as well)
+if [[ "$LOG_BACKEND" == file || "$LOG_BACKEND" == console ]]; then
+  mkdir -p -- "$(dirname -- "$LOGFILE")"
+fi
 
 # Mirror policy: auto (TTY only), 1 (always), 0 (never)
 LOG_TEE_CONSOLE="${LOG_TEE_CONSOLE:-auto}"
@@ -346,7 +357,7 @@ _chdman_progress_filter() {
             continue
         fi
 
-        log DEBUG "$line"
+        log "$CHDMAN_MSG_LEVEL" "$line"
     done
 
     # At EOF: end the progress line neatly with a single newline
@@ -809,7 +820,7 @@ process_input() {
         fi
     }
     trap _cleanup RETURN  # runs on any return/exit from this function
-    
+
     if is_in_list "$ext" "${archive_exts[@]}"; then
         archives_processed=$((archives_processed + 1))
         case "$ext" in
