@@ -157,9 +157,10 @@ verify_output_log() {
 }
 
 is_in_list() {
-    local value="$1"; shift
-    local list=("$@")
-    [[ " ${list[*]} " =~ (^|[[:space:]])"$value"([[:space:]]|$) ]]
+  local needle="$1"; shift
+  local x
+  for x in "$@"; do [[ "$x" == "$needle" ]] && return 0; done
+  return 1
 }
 
 required_commands=(chdman unzip unrar 7z stat awk)
@@ -345,8 +346,7 @@ _chdman_progress_filter() {
             continue
         fi
 
-        # Send diagnostics directly to the logfile (NO terminal output, NO newline to TTY)
-        printf "[%s] %s\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$line" >> "$LOGFILE"
+        log DEBUG "$line"
     done
 
     # At EOF: end the progress line neatly with a single newline
@@ -846,7 +846,6 @@ process_input() {
 
     # Extract archive to temp and discover disc files
     if is_in_list "$ext" "${archive_exts[@]}"; then
-        local temp_dir
         temp_dir="$(mktemp -d -t "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
         log INFO "📦 Extracting $input_file to $temp_dir"
         case "$ext" in
