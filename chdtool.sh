@@ -576,7 +576,7 @@ generate_m3u_for_base() {
 
     # migrate legacy → sanitized (only if sanitized doesn't exist yet)
     if [[ -f "$legacy_path" && ! -f "$m3u_path" ]]; then
-        mv -f "$legacy_path" "$m3u_path"
+        mv -f -- "$legacy_path" "$m3u_path"
         log INFO "🧹 Renamed legacy M3U → sanitized: $(basename "$legacy_path") → $(basename "$m3u_path")"
     fi
 
@@ -592,7 +592,7 @@ generate_m3u_for_base() {
         # Remember pre-move existence to log Created vs Updated correctly
         local _m3u_existed=false
         [[ -f "$m3u_path" ]] && _m3u_existed=true
-        mv -f "$tmp_m3u" "$m3u_path"
+        mv -f -- "$tmp_m3u" "$m3u_path"
         if [[ "$_m3u_existed" == true ]]; then
             log INFO "📝 Updated M3U: $m3u_path"
         else
@@ -855,7 +855,7 @@ process_input() {
         log INFO "✅ All expected CHDs verified for $input_file"
         if [[ "$KEEP_ORIGINALS" != true ]]; then
             log INFO "🗑️ Removing original input file: $input_file"
-            rm -f "$input_file"
+            rm -f -- "$input_file"
         else
             log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
         fi
@@ -906,14 +906,14 @@ process_input() {
         if verify_chds "$outdir" "${tmp_chds[@]##*/}"; then
             for tmp_chd in "${tmp_chds[@]}"; do
                 local final_chd="${tmp_chd%.tmp}"
-                mv -f "$tmp_chd" "$final_chd"
+                mv -f -- "$tmp_chd" "$final_chd"
                 log INFO "🔄 Replaced old CHD with new verified CHD: $final_chd"
                 chds_created=$((chds_created + 1))
             done
 
             if [[ "$KEEP_ORIGINALS" != true ]]; then
                 log INFO "🗑️ Removing original input file: $input_file"
-                rm -f "$input_file"
+                rm -f -- "$input_file"
             else
                 log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
             fi
