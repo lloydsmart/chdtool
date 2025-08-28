@@ -38,11 +38,10 @@ EOF
   chmod +x "$stub_bin/logger"
 
 env PATH="$stub_bin:$PATH" \
-    DRY_RUN=true \
     RUN_ID="testrun" \
     LOG_LEVEL_THRESHOLD=INFO \
     "$@" \
-    "$SCRIPT" "$INPUT_DIR"
+    "$SCRIPT" --dry-run "$INPUT_DIR"
 
   if [[ $expect_file -eq 1 ]]; then
     shopt -s nullglob
