@@ -6,9 +6,10 @@ script_start_time=$(date +%s)
 shopt -s nullglob
 shopt -s extglob
 
-USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] <input directory>"
+USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] [--dry-run|-n] <input directory>"
 KEEP_ORIGINALS=false
 RECURSIVE=false
+DRY_RUN=false
 INPUT_DIR=""
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 CHDMAN_MSG_LEVEL="${CHDMAN_MSG_LEVEL:-DEBUG}"
@@ -24,6 +25,8 @@ while [[ $# -gt 0 ]]; do
             KEEP_ORIGINALS=true; shift ;;
         --recursive|-r)
             RECURSIVE=true; shift ;;
+        --dry-run|-n)
+            DRY_RUN=true; shift ;;
         -*)
             echo "❌ Unknown option: $1" >&2
             echo "$USAGE" >&2; exit 1 ;;
@@ -165,6 +168,7 @@ log() {
 
 log INFO "🚀 Script started, input dir: $INPUT_DIR"
 [[ "$RECURSIVE" == true ]] && log INFO "📂 Recursive mode enabled — scanning subdirectories"
+[[ "$DRY_RUN" == true ]] && log INFO "🧪 Dry-run mode: no files will be written, moved, or deleted"
 
 is_in_list() {
   local needle="$1"; shift
@@ -202,13 +206,27 @@ build_ext_regex() {
 
 for cmd in "${required_commands[@]}"; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
-        log ERROR "❌ Error: Required command '$cmd' not found. Please install it and ensure it's in your PATH."
-        exit 1
+        if [[ "$DRY_RUN" == true ]]; then
+            log WARN "🧪 (dry-run) '$cmd' not found — would be required for a real run"
+        else
+            log ERROR "❌ Error: Required command '$cmd' not found. Please install it and ensure it's in your PATH."
+            exit 1
+        fi
     fi
 done
 
-chdman_version="$(chdman --help 2>&1 | head -n 1 || true)"
-log INFO "ℹ️ Using $chdman_version"
+if command -v chdman >/dev/null 2>&1; then
+    chdman_version="$(chdman --help 2>&1 | head -n 1 || true)"
+    log INFO "ℹ️ Using $chdman_version"
+else
+    if [[ "$DRY_RUN" == true ]]; then
+        log WARN "🧪 (dry-run) 'chdman' not found — would be required for a real run"
+    else
+        log ERROR "❌ 'chdman' not found in PATH"
+        exit 1
+    fi
+fi
+
 # Detect 'createdvd' capability (newer chdman versions)
 CHDMAN_HAS_CREATEDVD=false
 if chdman -help 2>&1 | grep -qiE '(^|[[:space:]])createdvd([[:space:]]|$)'; then
@@ -559,27 +577,35 @@ generate_m3u_for_base() {
 
     # migrate legacy → sanitized (only if sanitized doesn't exist yet)
     if [[ -f "$legacy_path" && ! -f "$m3u_path" ]]; then
-        mv -f -- "$legacy_path" "$m3u_path"
-        log INFO "🧹 Renamed legacy M3U → sanitized: $(basename "$legacy_path") → $(basename "$m3u_path")"
+        if [[ "$DRY_RUN" == true ]]; then
+            log INFO "🧪 (dry-run) Would rename legacy M3U → sanitized: $(basename "$legacy_path") → $(basename "$m3u_path")"
+        else
+            mv -f -- "$legacy_path" "$m3u_path"
+            log INFO "🧹 Renamed legacy M3U → sanitized: $(basename "$legacy_path") → $(basename "$m3u_path")"
+        fi
     fi
 
-    local tmp_m3u="$m3u_path.tmp"
-    : > "$tmp_m3u"
-    for f in "${members[@]}"; do
-        printf '%s\n' "$(basename "$f")" >> "$tmp_m3u"
-    done
-    if [[ -f "$m3u_path" ]] && cmp -s "$tmp_m3u" "$m3u_path"; then
-        rm -f "$tmp_m3u"
-        log INFO "🧾 M3U up-to-date: $m3u_path"
+    if [[ "$DRY_RUN" == true ]]; then
+        log INFO "🧪 (dry-run) Would (re)write M3U: $m3u_path with ${#members[@]} lines"
     else
-        # Remember pre-move existence to log Created vs Updated correctly
-        local _m3u_existed=false
-        [[ -f "$m3u_path" ]] && _m3u_existed=true
-        mv -f -- "$tmp_m3u" "$m3u_path"
-        if [[ "$_m3u_existed" == true ]]; then
-            log INFO "📝 Updated M3U: $m3u_path"
+        local tmp_m3u="$m3u_path.tmp"
+        : > "$tmp_m3u"
+        for f in "${members[@]}"; do
+            printf '%s\n' "$(basename "$f")" >> "$tmp_m3u"
+        done
+        if [[ -f "$m3u_path" ]] && cmp -s "$tmp_m3u" "$m3u_path"; then
+            rm -f "$tmp_m3u"
+            log INFO "🧾 M3U up-to-date: $m3u_path"
         else
-            log INFO "🆕 Created M3U: $m3u_path"
+            # Remember pre-move existence to log Created vs Updated correctly
+            local _m3u_existed=false
+            [[ -f "$m3u_path" ]] && _m3u_existed=true
+            mv -f -- "$tmp_m3u" "$m3u_path"
+            if [[ "$_m3u_existed" == true ]]; then
+                log INFO "📝 Updated M3U: $m3u_path"
+            else
+                log INFO "🆕 Created M3U: $m3u_path"
+            fi
         fi
     fi
 }
@@ -595,7 +621,12 @@ maybe_generate_m3u_for() {
     fi
     local base="${parsed%%|*}"
     log DEBUG "🔎 M3U check — base: $base"
-    generate_m3u_for_base "$outdir" "$base"
+
+    if [[ "$DRY_RUN" == true ]]; then
+        log INFO "🧪 (dry-run) Would generate/update M3U for base: $base"
+    else
+        generate_m3u_for_base "$outdir" "$base"
+    fi
 }
 # ---------- end M3U helpers ----------
 # --- Global interrupt + cleanup handling --------------------------------------
@@ -643,6 +674,7 @@ _on_interrupt() {
   cleanup_all
   exit 130
 }
+
 # Ctrl-C (INT) and TERM should both stop the whole script
 trap _on_interrupt INT TERM
 trap cleanup_all EXIT
@@ -651,6 +683,13 @@ verify_chds() {
     local outdir="$1"; shift
     local chds=("$@")
     local all_verified=true
+
+    if [[ "$DRY_RUN" == true ]]; then
+        for chd in "${chds[@]}"; do
+            log INFO "🧪 (dry-run) Would verify: $outdir/$chd"
+        done
+        return 0
+    fi
 
     for chd in "${chds[@]}"; do
         local chd_path="$outdir/$chd"
@@ -864,6 +903,12 @@ convert_disc_file() {
 
     log INFO "$icon Detected $disc_type image → using chdman $subcmd"
     log INFO "🔧 Converting: $file -> $tmp_chd"
+
+    if [[ "$DRY_RUN" == true ]]; then
+        log INFO "🧪 (dry-run) Would run: ${CHDMAN_BIN:-chdman} $subcmd -i \"$file\" -o \"$tmp_chd\""
+        return 0
+    fi
+
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
         if ! PHASE_DEFAULT="Converting" "${CHDMAN_BIN:-chdman}" "$subcmd" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
             log ERROR "❌ chdman $subcmd failed for: $file"
@@ -929,8 +974,12 @@ process_input() {
     if verify_chds "$outdir" "${expected_chds[@]}"; then
         log INFO "✅ All expected CHDs verified for $input_file"
         if [[ "$KEEP_ORIGINALS" != true ]]; then
-            log INFO "🗑️ Removing original input file: $input_file"
-            rm -f -- "$input_file"
+            if [[ "$DRY_RUN" == true ]]; then
+                log INFO "🧪 (dry-run) Would remove original input file: $input_file"
+            else
+                log INFO "🗑️ Removing original input file: $input_file"
+                rm -f -- "$input_file"
+            fi
         else
             log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
         fi
@@ -946,39 +995,53 @@ process_input() {
 
     # Extract archive to temp and discover disc files
     if is_in_list "$ext" "${archive_exts[@]}"; then
-        temp_dir="$(mktemp -d -t "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
-        log INFO "📦 Extracting $input_file to $temp_dir"
-        TEMP_DIRS+=("$temp_dir")
-        case "$ext" in
-            zip) unzip -qq "$input_file" -d "$temp_dir" ;;
-            rar) unrar x -o+ "$input_file" "$temp_dir" >/dev/null ;;
-            7z|7zip) 7z x -y -o"$temp_dir" "$input_file" >/dev/null ;;
-        esac
+        if [[ "$DRY_RUN" == true ]]; then
+            # No mktemp in dry-run — just show intent
+            local _dry_temp="(tempdir)"
+            log INFO "🧪 (dry-run) Would extract $input_file to $_dry_temp"
+            # We also skip scanning extracted files in dry-run (no filesystem changes exist).
+            # But keep expected_chds populated from archive listing (already done above).
+        else
+            temp_dir="$(mktemp -d -t "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
+            log INFO "📦 Extracting $input_file to $temp_dir"
+            TEMP_DIRS+=("$temp_dir")
+            case "$ext" in
+                zip) unzip -qq "$input_file" -d "$temp_dir" ;;
+                rar) unrar x -o+ "$input_file" "$temp_dir" >/dev/null ;;
+                7z|7zip) 7z x -y -o"$temp_dir" "$input_file" >/dev/null ;;
+            esac
 
-        read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
-        mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
+            read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
+            mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
 
-        if [[ ${#disc_files[@]} -eq 0 && ${#archive_entries[@]} -gt 0 ]]; then
-            for entry in "${archive_entries[@]}"; do
-                local full_path="$temp_dir/$entry"
-                [[ -f "$full_path" ]] && disc_files+=("$full_path")
-            done
+            if [[ ${#disc_files[@]} -eq 0 && ${#archive_entries[@]} -gt 0 ]]; then
+                for entry in "${archive_entries[@]}"; do
+                    local full_path="$temp_dir/$entry"
+                    [[ -f "$full_path" ]] && disc_files+=("$full_path")
+                done
+            fi
         fi
     fi
 
     local archive_chd_size=0
     local tmp_chds=()
 
-    for disc in "${disc_files[@]}"; do
-        if convert_disc_file "$disc" "$outdir"; then
-            tmp_chds+=("$outdir/$(basename "${disc%.*}").chd.tmp")
-        else
-            failures=$((failures + 1))
-        fi
-    done
+    if [[ "$DRY_RUN" == true ]]; then
+        for disc in "${disc_files[@]}"; do
+            log INFO "🧪 (dry-run) Would convert: $disc -> $outdir/$(basename "${disc%.*}").chd"
+        done
+    else
+        for disc in "${disc_files[@]}"; do
+            if convert_disc_file "$disc" "$outdir"; then
+                tmp_chds+=("$outdir/$(basename "${disc%.*}").chd.tmp")
+            else
+                failures=$((failures + 1))
+            fi
+        done
+    fi
 
     # Verify .tmp CHDs and finalize
-    if [[ ${#tmp_chds[@]} -gt 0 ]]; then
+    if [[ "$DRY_RUN" != true && ${#tmp_chds[@]} -gt 0 ]]; then
         if verify_chds "$outdir" "${tmp_chds[@]##*/}"; then
             for tmp_chd in "${tmp_chds[@]}"; do
                 local final_chd="${tmp_chd%.tmp}"
@@ -988,12 +1051,16 @@ process_input() {
             done
 
             if [[ "$KEEP_ORIGINALS" != true ]]; then
-                log INFO "🗑️ Removing original input file: $input_file"
-                rm -f -- "$input_file"
+                if [[ "$DRY_RUN" == true ]]; then
+                    log INFO "🧪 (dry-run) Would remove original input file: $input_file"
+                else
+                    log INFO "🗑️ Removing original input file: $input_file"
+                    rm -f -- "$input_file"
+                fi
             else
                 log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
             fi
-
+            
             for chd in "${expected_chds[@]}"; do
                 if [[ -f "$outdir/$chd" ]]; then
                     archive_chd_size=$((archive_chd_size + $(get_file_size "$outdir/$chd")))
