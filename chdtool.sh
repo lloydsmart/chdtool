@@ -229,11 +229,15 @@ fi
 
 # Detect 'createdvd' capability (newer chdman versions)
 CHDMAN_HAS_CREATEDVD=false
-if chdman -help 2>&1 | grep -qiE '(^|[[:space:]])createdvd([[:space:]]|$)'; then
-    CHDMAN_HAS_CREATEDVD=true
+if command -v chdman >/dev/null 2>&1; then
+  if chdman -help 2>&1 | grep -qiE '(^|[[:space:]])createdvd([[:space:]]|$)'; then
+      CHDMAN_HAS_CREATEDVD=true
+  fi
+  log DEBUG "ℹ️ chdman createdvd support: $CHDMAN_HAS_CREATEDVD"
+else
+  # In dry-run without chdman, just log at DEBUG and keep default false
+  [[ "$DRY_RUN" == true ]] && log DEBUG "ℹ️ chdman not present (dry-run); assuming no createdvd"
 fi
-log DEBUG "ℹ️ chdman createdvd support: $CHDMAN_HAS_CREATEDVD"
-
 
 total_original_size=0
 total_chd_size=0
@@ -1020,6 +1024,14 @@ process_input() {
                     [[ -f "$full_path" ]] && disc_files+=("$full_path")
                 done
             fi
+        fi
+
+        # In dry-run, also show which members would be converted
+        if [[ "$DRY_RUN" == true && ${#archive_entries[@]} -gt 0 ]]; then
+            for entry in "${archive_entries[@]}"; do
+                # Mirror the naming used later: basename without extension + .chd
+                log INFO "🧪 (dry-run) Would convert: $entry -> $outdir/$(basename "${entry%.*}").chd"
+            done
         fi
     fi
 
