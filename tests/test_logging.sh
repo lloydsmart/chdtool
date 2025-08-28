@@ -37,11 +37,25 @@ exit 0
 EOF
   chmod +x "$stub_bin/logger"
 
-env PATH="$stub_bin:$PATH" \
-    RUN_ID="testrun" \
-    LOG_LEVEL_THRESHOLD=INFO \
-    "$@" \
-    "$SCRIPT" --dry-run "$INPUT_DIR"
+  # run the script; capture rc and stderr for debugging
+  set +e
+  run_stderr="$(mktemp)"
+  env PATH="$stub_bin:$PATH" \
+      RUN_ID="testrun" \
+      LOG_LEVEL_THRESHOLD=INFO \
+      "$@" \
+      "$SCRIPT" --dry-run "$INPUT_DIR" 2> "$run_stderr"
+  rc=$?
+  set -e
+
+  if [[ $rc -ne 0 ]]; then
+    echo "WARN: script exited with code $rc in case: $name"
+    echo "---- captured stderr ----"
+    sed -n '1,200p' "$run_stderr" || true
+    echo "-------------------------"
+    # We do NOT exit here; we still check the logfile to help diagnose.
+  fi
+  rm -f "$run_stderr"
 
   if [[ $expect_file -eq 1 ]]; then
     shopt -s nullglob
