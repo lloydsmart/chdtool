@@ -3,6 +3,34 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0),
 and uses semantic versioning for tags (vMAJOR.MINOR.PATCH).
+## [0.2.4] - 2025-08-28
+
+### CI
+
+- Add test for logging
+- Tweak for debugging
+- Use --dry-run for logging tests
+
+### Chores
+
+- *(changelog)* Update for v0.2.3
+- Update gitignore
+- Not sure how this got duplicated
+
+### Features
+
+- Add EXIT trap to do cleanup
+- Add dry-run mode!
+- Improve dry-run mode
+- Improve logging. Default to file + journald, but be configurable.
+
+### Fixes
+
+- Remove duplication, add short options for logging switches
+- Ci: not working
+- Test script fails due to env vars
+- Ci: failing
+- Exit status on test
 ## [0.2.3] - 2025-08-27
 
 ### Fixes
