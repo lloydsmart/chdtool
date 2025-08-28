@@ -639,11 +639,13 @@ _on_interrupt() {
   # One place to handle Ctrl-C/TERM: restore terminal, clean, then exit(130)
   _restore_wrap_global
   log WARN "🛑 Interrupted — cleaning up and exiting…"
+  trap - EXIT
   cleanup_all
   exit 130
 }
 # Ctrl-C (INT) and TERM should both stop the whole script
 trap _on_interrupt INT TERM
+trap cleanup_all EXIT
 
 verify_chds() {
     local outdir="$1"; shift
