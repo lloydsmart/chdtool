@@ -21,3 +21,6 @@ logs/
 # Python virtual envs (if any tooling is added later)
 .venv/
 env/
+
+# Local helper/test scripts
+reset-sampledir.sh
