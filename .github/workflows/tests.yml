@@ -1,5 +1,4 @@
 name: tests
-
 on:
   push:
   pull_request:
@@ -9,12 +8,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Install test deps
         run: |
           sudo apt-get update
           sudo apt-get install -y unzip zip make
+
+      - name: Debug workspace
+        run: |
+          pwd
+          ls -la
+          sed -n '1,120p' Makefile
+
       - name: Run tests
         run: make test
+
       - name: Upload logs from tests (always)
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -22,4 +30,3 @@ jobs:
           name: logs-from-tests
           path: logs/
           if-no-files-found: ignore
-          
