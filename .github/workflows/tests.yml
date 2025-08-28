@@ -1,19 +1,25 @@
-name: CI
+name: tests
 
 on:
   push:
   pull_request:
 
 jobs:
-  test-m3u:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install test deps
         run: |
           sudo apt-get update
           sudo apt-get install -y unzip zip make
-
       - name: Run tests
         run: make test
+      - name: Upload logs from tests (always)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-from-tests
+          path: logs/
+          if-no-files-found: ignore
+          
