@@ -98,3 +98,5 @@ run_case "LOG_DEST=journald + tee ON" 1 LOG_DEST=journald LOG_TEE_FILE=1
 
 # Journald + tee OFF → no file expected
 run_case "LOG_DEST=journald + tee OFF" 0 LOG_DEST=journald LOG_TEE_FILE=0
+
+exit 0
