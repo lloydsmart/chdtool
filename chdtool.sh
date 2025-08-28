@@ -6,7 +6,7 @@ script_start_time=$(date +%s)
 shopt -s nullglob
 shopt -s extglob
 
-USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] [--dry-run|-n] [--file-tee|--no-file-tee] <input directory>"
+USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] [--dry-run|-n] [--file-tee|-F|--no-file-tee|-N] <input directory>"
 KEEP_ORIGINALS=false
 RECURSIVE=false
 DRY_RUN=false
@@ -27,9 +27,9 @@ while [[ $# -gt 0 ]]; do
             RECURSIVE=true; shift ;;
         --dry-run|-n)
             DRY_RUN=true; shift ;;
-        --file-tee)
+        --file-tee|-F)
             LOG_TEE_FILE=1; shift ;;
-        --no-file-tee)
+        --no-file-tee|-N)
             LOG_TEE_FILE=0; shift ;;
         -*)
             echo "❌ Unknown option: $1" >&2
@@ -108,9 +108,6 @@ fi
 if [[ "$LOG_BACKEND" == file || "$LOG_BACKEND" == console ]] || __should_mirror_file; then
   mkdir -p -- "$(dirname -- "$LOGFILE")"
 fi
-
-# Mirror policy: auto (TTY only), 1 (always), 0 (never)
-LOG_TEE_CONSOLE="${LOG_TEE_CONSOLE:-auto}"
 
 __should_mirror_console() {
   case "${LOG_TEE_CONSOLE}" in
