@@ -6,7 +6,7 @@ script_start_time=$(date +%s)
 shopt -s nullglob
 shopt -s extglob
 
-USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] [--dry-run|-n] <input directory>"
+USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] [--dry-run|-n] [--file-tee|--no-file-tee] <input directory>"
 KEEP_ORIGINALS=false
 RECURSIVE=false
 DRY_RUN=false
@@ -27,6 +27,10 @@ while [[ $# -gt 0 ]]; do
             RECURSIVE=true; shift ;;
         --dry-run|-n)
             DRY_RUN=true; shift ;;
+        --file-tee)
+            LOG_TEE_FILE=1; shift ;;
+        --no-file-tee)
+            LOG_TEE_FILE=0; shift ;;
         -*)
             echo "❌ Unknown option: $1" >&2
             echo "$USAGE" >&2; exit 1 ;;
@@ -48,7 +52,7 @@ if [[ ! -d "$INPUT_DIR" ]]; then
   echo "❌ Input directory does not exist or is not a directory: $INPUT_DIR" >&2
   exit 1
 fi
-mkdir -p logs
+
 LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
 
 # --- Pluggable logging: console/file/syslog/journald (auto) -------------------
@@ -58,6 +62,22 @@ LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
 #   LOG_TAG=chdtool
 LOG_DEST="${LOG_DEST:-auto}"
 LOG_TAG="${LOG_TAG:-chdtool}"
+
+# Mirror policy: auto (TTY only), 1 (always), 0 (never)
+LOG_TEE_CONSOLE="${LOG_TEE_CONSOLE:-auto}"
+
+# New: mirror-to-file policy for journald/syslog backends.
+# 1|true|yes (default) → also append to $LOGFILE
+# 0|false|no           → do not write a file when using journald/syslog
+LOG_TEE_FILE="${LOG_TEE_FILE:-1}"
+
+__should_mirror_file() {
+  case "${LOG_TEE_FILE}" in
+    1|true|yes) return 0 ;;
+    0|false|no) return 1 ;;
+    *) return 0 ;; # default to on
+  esac
+}
 
 _detect_backend() {
   case "$LOG_DEST" in
@@ -84,8 +104,8 @@ if [[ "$LOG_BACKEND" == journald || "$LOG_BACKEND" == syslog ]]; then
   LOG_TAG="${LOG_TAG}[${RUN_ID}]"
 fi
 
-# ensure the logfile directory exists when we write to a file (console tees to file as well)
-if [[ "$LOG_BACKEND" == file || "$LOG_BACKEND" == console ]]; then
+# ensure the logfile directory exists when we might write to it
+if [[ "$LOG_BACKEND" == file || "$LOG_BACKEND" == console ]] || __should_mirror_file; then
   mkdir -p -- "$(dirname -- "$LOGFILE")"
 fi
 
@@ -111,45 +131,57 @@ __console_print() {
 
 # Internal emitter: $1=LEVEL (INFO/WARN/ERROR/DEBUG), $2...=message
 _emit_log() {
-  local lvl="$1"; shift || true
-  local msg="${*:-}"
-  local ts; ts="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    local lvl="$1"; shift || true
+    local msg="${*:-}"
+    local ts; ts="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
-  local pri=info
-  case "$lvl" in
-    DEBUG) pri=debug ;;
-    INFO)  pri=info  ;;
-    WARN)  pri=warning ;;
-    ERROR) pri=err ;;
-  esac
+    local pri=info
+    case "$lvl" in
+        DEBUG) pri=debug ;;
+        INFO)  pri=info  ;;
+        WARN)  pri=warning ;;
+        ERROR) pri=err ;;
+    esac
 
-  case "$LOG_BACKEND" in
-    journald)
-      {
-        echo "LEVEL=$lvl"
-        echo "RUN_ID=$RUN_ID"
-        while IFS= read -r line; do echo "$line"; done <<< "$msg"
-      } | systemd-cat --priority="$pri" --identifier="$LOG_TAG"
-      __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
-      ;;
-    syslog)
-      while IFS= read -r line; do
-        logger -p "user.$pri" -t "$LOG_TAG" -- "$lvl: $line"
-      done <<< "$msg"
-      __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
-      ;;
-    file)
-      while IFS= read -r line; do
-        printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" >> "$LOGFILE"
-      done <<< "$msg"
-      __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
-      ;;
-    console|*)
-      while IFS= read -r line; do
-        printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" | tee -a "$LOGFILE"
-      done <<< "$msg"
-      ;;
-  esac
+    case "$LOG_BACKEND" in
+        journald)
+        {
+            echo "LEVEL=$lvl"
+            echo "RUN_ID=$RUN_ID"
+            while IFS= read -r line; do echo "$line"; done <<< "$msg"
+        } | systemd-cat --priority="$pri" --identifier="$LOG_TAG"
+        # Also append to file if enabled
+        if __should_mirror_file; then
+            while IFS= read -r line; do
+            printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" >> "$LOGFILE"
+            done <<< "$msg"
+        fi
+        __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
+        ;;
+        syslog)
+        while IFS= read -r line; do
+            logger -p "user.$pri" -t "$LOG_TAG" -- "$lvl: $line"
+        done <<< "$msg"
+        # Also append to file if enabled
+        if __should_mirror_file; then
+            while IFS= read -r line; do
+            printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" >> "$LOGFILE"
+            done <<< "$msg"
+        fi
+        __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
+        ;;
+        file)
+        while IFS= read -r line; do
+            printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" >> "$LOGFILE"
+        done <<< "$msg"
+        __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
+        ;;
+        console|*)
+        while IFS= read -r line; do
+            printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" | tee -a "$LOGFILE"
+        done <<< "$msg"
+        ;;
+    esac
 }
 
 # Public logger. Backwards-compatible: `log "message"` still works.
