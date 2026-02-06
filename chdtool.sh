@@ -259,7 +259,7 @@ fi
 # Detect 'createdvd' capability (newer chdman versions)
 CHDMAN_HAS_CREATEDVD=false
 if command -v chdman >/dev/null 2>&1; then
-  if chdman -help 2>&1 | grep -qiE 'createdvd'; then
+  if (chdman -help 2>&1 | grep -qiE 'createdvd'); then
       CHDMAN_HAS_CREATEDVD=true
   fi
   log DEBUG "ℹ️ chdman createdvd support: $CHDMAN_HAS_CREATEDVD"
