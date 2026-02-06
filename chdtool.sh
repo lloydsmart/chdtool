@@ -53,6 +53,10 @@ if [[ ! -d "$INPUT_DIR" ]]; then
   exit 1
 fi
 
+# Use a disk-based temp directory to avoid filling up RAM
+TMPDIR="/var/tmp/chdtool"
+mkdir -p "$TMPDIR"
+
 LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
 
 # --- Pluggable logging: console/file/syslog/journald (auto) -------------------
@@ -698,12 +702,11 @@ cleanup_all() {
     done < <(find "$INPUT_DIR" -type f \( -name '*.chd.tmp' -o -name '*.m3u.tmp' \) -print0)
   fi
 
-  # Remove verify scratch files in /tmp that match our mktemp prefix
-  # (mktemp -t chdverify_XXXXXX => /tmp/chdverify_*)
+  # Remove verify scratch files in the new temp directory
   while IFS= read -r -d '' f; do
     rm -f -- "$f"
     log INFO "🗑️ Removed verify scratch: $f"
-  done < <(find /tmp -maxdepth 1 -type f -name 'chdverify_*' -print0 2>/dev/null || true)
+  done < <(find "$TMPDIR" -maxdepth 1 -type f -name 'chdverify_*' -print0 2>/dev/null || true)
 }
 
 _on_interrupt() {
@@ -740,7 +743,7 @@ verify_chds() {
 
         local verify_exit_code=0
         local tmpout
-        tmpout="$(mktemp -t chdverify_XXXXXX)"
+        tmpout="$(mktemp -p "$TMPDIR" chdverify_XXXXXX)"
 
         log INFO "🔎 Verifying: $chd_path"
         if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
@@ -1043,7 +1046,7 @@ process_input() {
             # We also skip scanning extracted files in dry-run (no filesystem changes exist).
             # But keep expected_chds populated from archive listing (already done above).
         else
-            temp_dir="$(mktemp -d -t "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
+            temp_dir="$(mktemp -d -p "$TMPDIR" "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
             log INFO "📦 Extracting $input_file to $temp_dir"
             TEMP_DIRS+=("$temp_dir")
             case "$ext" in
