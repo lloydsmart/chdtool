@@ -259,9 +259,16 @@ fi
 # Detect 'createdvd' capability (newer chdman versions)
 CHDMAN_HAS_CREATEDVD=false
 if command -v chdman >/dev/null 2>&1; then
-  if (chdman -help 2>&1 | grep -qiE 'createdvd'); then
+  set +o pipefail
+  log DEBUG "chdman -help output: $(chdman -help 2>&1)"
+  if chdman -help 2>&1 | grep -qiE 'createdvd'; then
+      log DEBUG "Found 'createdvd' in chdman -help output"
       CHDMAN_HAS_CREATEDVD=true
+  else
+      log DEBUG "Did NOT find 'createdvd' in chdman -help output"
+      CHDMAN_HAS_CREATEDVD=false
   fi
+  set -o pipefail
   log DEBUG "ℹ️ chdman createdvd support: $CHDMAN_HAS_CREATEDVD"
 else
   # In dry-run without chdman, just log at DEBUG and keep default false
@@ -921,6 +928,7 @@ convert_disc_file() {
 
     local subcmd icon
     if [[ "$disc_type" == "dvd" ]]; then
+        log DEBUG "DVD detected, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
         if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
             subcmd="createdvd"
             icon="📀"  # DVD
