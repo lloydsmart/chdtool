@@ -921,6 +921,7 @@ convert_disc_file() {
 
     local subcmd icon
     if [[ "$disc_type" == "dvd" ]]; then
+        log DEBUG "DVD detected, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
         if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
             subcmd="createdvd"
             icon="📀"  # DVD
