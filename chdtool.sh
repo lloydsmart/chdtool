@@ -11,6 +11,7 @@ KEEP_ORIGINALS=false
 RECURSIVE=false
 DRY_RUN=false
 INPUT_DIR=""
+IS_RAM_DISK=false
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 CHDMAN_MSG_LEVEL="${CHDMAN_MSG_LEVEL:-DEBUG}"
 case "${CHDMAN_MSG_LEVEL^^}" in
@@ -52,6 +53,10 @@ if [[ ! -d "$INPUT_DIR" ]]; then
   echo "❌ Input directory does not exist or is not a directory: $INPUT_DIR" >&2
   exit 1
 fi
+
+# Use a disk-based temp directory to avoid filling up RAM
+TMPDIR="/var/tmp/chdtool"
+mkdir -p "$TMPDIR"
 
 LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
 
@@ -259,9 +264,16 @@ fi
 # Detect 'createdvd' capability (newer chdman versions)
 CHDMAN_HAS_CREATEDVD=false
 if command -v chdman >/dev/null 2>&1; then
-  if (chdman -help 2>&1 | grep -qiE 'createdvd'); then
+  set +o pipefail
+  log DEBUG "chdman -help output: $(chdman -help 2>&1)"
+  if chdman -help 2>&1 | grep -qiE 'createdvd'; then
+      log DEBUG "Found 'createdvd' in chdman -help output"
       CHDMAN_HAS_CREATEDVD=true
+  else
+      log DEBUG "Did NOT find 'createdvd' in chdman -help output"
+      CHDMAN_HAS_CREATEDVD=false
   fi
+  set -o pipefail
   log DEBUG "ℹ️ chdman createdvd support: $CHDMAN_HAS_CREATEDVD"
 else
   # In dry-run without chdman, just log at DEBUG and keep default false
@@ -305,6 +317,24 @@ get_file_size() {
         stat -f%z "$1"
     fi
 }
+
+check_temp_storage() {
+    local tmp_dir="$1"
+    local fs_type
+    fs_type=$(df -T "$tmp_dir" | awk 'NR==2 {print $2}')
+
+    if [[ "$fs_type" == "tmpfs" ]]; then
+        local tmp_limit
+        tmp_limit=$(df -h "$tmp_dir" | awk 'NR==2 {print $4}')
+        log WARN "⚠️ $tmp_dir is a RAM disk (tmpfs). Extracted ISOs will consume physical RAM!"
+        log WARN "💡 Available space in RAM disk: $tmp_limit"
+
+        # Force thread reduction if we are in a RAM disk
+        IS_RAM_DISK=true
+    fi
+}
+
+check_temp_storage "$TMPDIR"
 
 # ---------- chdman progress handling ----------
 # Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
@@ -386,7 +416,7 @@ _chdman_progress_filter() {
 
     local last_draw=0 phase="${PHASE_DEFAULT:-Compressing}" ratio="" progress_active=0 ms
 
-    while IFS= read -r line || [[ -n "$line" ]]; do
+    while IFS= read -d $'\r' -r line || [[ -n "$line" ]]; do
         if [[ "$line" =~ ([0-9]+([.][0-9]+)?)%[[:space:]]*complete ]]; then
             local pct="${BASH_REMATCH[1]}"
             [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
@@ -691,12 +721,11 @@ cleanup_all() {
     done < <(find "$INPUT_DIR" -type f \( -name '*.chd.tmp' -o -name '*.m3u.tmp' \) -print0)
   fi
 
-  # Remove verify scratch files in /tmp that match our mktemp prefix
-  # (mktemp -t chdverify_XXXXXX => /tmp/chdverify_*)
+  # Remove verify scratch files in the new temp directory
   while IFS= read -r -d '' f; do
     rm -f -- "$f"
     log INFO "🗑️ Removed verify scratch: $f"
-  done < <(find /tmp -maxdepth 1 -type f -name 'chdverify_*' -print0 2>/dev/null || true)
+  done < <(find "$TMPDIR" -maxdepth 1 -type f -name 'chdverify_*' -print0 2>/dev/null || true)
 }
 
 _on_interrupt() {
@@ -733,7 +762,7 @@ verify_chds() {
 
         local verify_exit_code=0
         local tmpout
-        tmpout="$(mktemp -t chdverify_XXXXXX)"
+        tmpout="$(mktemp -p "$TMPDIR" chdverify_XXXXXX)"
 
         log INFO "🔎 Verifying: $chd_path"
         if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
@@ -845,29 +874,53 @@ validate_cue_file() {
 }
 
 detect_disc_type() {
-    # Echo "cd" or "dvd" based on the image
     local img="$1"
-    local ext="${img##*.}"
-    ext="${ext,,}"
+    local ext
+    ext="${img##*.}"; ext="${ext,,}"
+    local sz
+    sz=$(get_file_size "$img" 2>/dev/null || echo 0)
+    
+    #1. Size-based "hard limits"
+    # If it's > 1GB, it's a DVD/PS2 regardless of what the header says (some PS2 games have weird headers that look like CDs)
+    local is_large_disc=false
+    (( sz >= 1000000000 )) && is_large_disc=true
 
-    # CUE/CCD/GDI are CD-type
+    #2. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
     case "$ext" in
         cue|ccd|gdi) echo "cd"; return 0 ;;
     esac
 
+    #3. Console Fingerprinting
+    # Reading the first 64KB covers Volume Descriptors and Boot Headers
+    local header
+    header=$(head -c 65535 "$img" 2>/dev/null | tr -d '\0')
+
+    case "$header" in
+        *"PLAYSTATION 2"*|*"NTSC-U/C PS2 DVD"*) echo "ps2"; return 0 ;;
+        *"PLAYSTATION "*|*"NTSC-U/C PS1 CD"*)
+            # If it says PS1 but it's >1GB, it's a mislabeled PS2 DVD
+            if [[ "$is_large_disc" == true ]]; then
+                log WARN "⚠️ Header indicates PS1 but size suggests PS2 DVD. Treating as PS2: $img"
+                echo "ps2"
+            else
+                echo "ps1"
+            fi
+            return 0 ;;
+        *"SEGA MEGA-CD"*) echo "segacd"; return 0 ;;
+        *"SEGA SEGAKATANA"*) echo "dreamcast"; return 0 ;;
+        *"SEGA SEGASATURN"*) echo "saturn"; return 0 ;;
+        *"PSP GAME"*|*"UMD VIDEO"*) echo "psp"; return 0 ;;
+    esac
+
+    #4. UDF/ISO logic fallback
     if [[ "$ext" == "iso" ]]; then
-        # Prefer 'file' if available
         if command -v file >/dev/null 2>&1; then
             local sig
             sig="$(file -b -- "$img" 2>/dev/null || true)"
-            if echo "$sig" | grep -qi 'UDF filesystem'; then
-                echo "dvd"; return 0
-            fi
+            [[ "$sig" == *"UDF filesystem"* ]] && { echo "dvd"; return 0; }
         else
-            # Fallback: sniff for UDF "NSR0[23]" anchor near sector 256
-            local anchor_offset=$((256 * 2048))
-            if dd if="$img" bs=1 skip="$anchor_offset" count=$((64 * 1024)) status=none 2>/dev/null \
-                | grep -aqE 'NSR0(2|3)?'; then
+            if dd if="$img" bs=2048 skip=256 count=32 status=none 2>/dev/null \
+                | tr -d '\0' | grep -qE 'NSR0(2|3)?'; then
                 echo "dvd"; return 0
             fi
         fi
@@ -875,15 +928,15 @@ detect_disc_type() {
         # Size heuristic: ≥ ~1 GB → likely DVD; otherwise CD
         local sz
         sz=$(get_file_size "$img")
-        if (( sz >= 1000000000 )); then
-            echo "dvd"; return 0
-        fi
-
-        echo "cd"; return 0
+        (( sz >= 1000000000 )) && { echo "dvd"; return 0; }
     fi
 
     # Unknown extension → default to CD (safe for createcd)
-    echo "cd"
+    if [[ "$is_large_disc" == true ]]; then
+        echo "dvd"; return 0
+    else
+        echo "cd"; return 0
+    fi
 }
 
 convert_disc_file() {
@@ -918,42 +971,80 @@ convert_disc_file() {
     # Decide CD vs DVD and pick subcommand + icon
     local disc_type
     disc_type="$(detect_disc_type "$file")"
+    local hunk_size=2448 #Default
 
     local subcmd icon
-    if [[ "$disc_type" == "dvd" ]]; then
-        if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
-            subcmd="createdvd"
-            icon="📀"  # DVD
-        else
-            log WARN "⚠️ Detected DVD image but this chdman lacks 'createdvd'. Skipping: $file"
-            failures=$((failures + 1))
-            return 1
-        fi
-    else
-        subcmd="createcd"
-        icon="💿"      # CD
-    fi
+    case "$disc_type" in
+        ps2|psp|dvd)
+            log DEBUG "DVD detected, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
+            if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
+                subcmd="createdvd"
+                hunk_size=2048 # DVD-ROM and PS2/PSP discs use standard 2K data sectors
+                icon="📀"
+            else
+                log WARN "⚠️ Detected DVD image but this chdman lacks 'createdvd'. Skipping: $file"
+                failures=$((failures + 1))
+                return 1
+            fi
+            ;;
+        ps1|dreamcast|segacd|saturn|cd)
+            subcmd="createcd"
+            hunk_size=2448 # CD-ROMs use 2352-byte raw sectors but chdman createcd expects 2448 to include subchannel data for full disc preservation
+            icon="💿"
+            ;;
+        *)
+            log WARN "⚠️ Unknown disc type detected, defaulting to CD settings: $file"
+            subcmd="createcd"
+            hunk_size=2448
+            icon="💿"
+            ;;
+    esac
 
     log INFO "$icon Detected $disc_type image → using chdman $subcmd"
     log INFO "🔧 Converting: $file -> $tmp_chd"
 
+    # Calculate safe threads: ~one thread per 2GB RAM (for CDs) or 4GB RAM (for DVDs)
+    local total_ram_mb=$(( $(awk '/MemTotal|SwapTotal/{sum+=$2} END{print sum}' /proc/meminfo) / 1024 ))
+    local available_ram=$total_ram_mb
+
+    if [[ "$IS_RAM_DISK" == true ]]; then
+        local iso_size_mb=$(( $(stat -c%s "$file") / 1048576 ))
+        (( available_ram = total_ram_mb - iso_size_mb))
+        log DEBUG "📉 RAM disk detected. Adjusting available RAM for chdman to ${available_ram}MB"
+    fi
+
+    local cpu_cores
+    cpu_cores=$(nproc)
+    local ram_per_thread=2048   # Default for CDs
+
+    if [[ "$subcmd" == "createdvd" ]]; then
+        ram_per_thread=4096  # 4GB floor for DVDs (LZMA is a beast here)
+    fi
+
+    # Calculate threads based on RAM (aiming for ~3GB per thread)
+    local threads=$(( available_ram / ram_per_thread ))
+    (( threads < 1 )) && threads=1
+    (( threads > cpu_cores )) && threads=$cpu_cores
+
     if [[ "$DRY_RUN" == true ]]; then
-        log INFO "🧪 (dry-run) Would run: ${CHDMAN_BIN:-chdman} $subcmd -i \"$file\" -o \"$tmp_chd\""
+        log INFO "🧪 (dry-run) Would run: ${CHDMAN_BIN:-chdman} $subcmd -np $threads -i \"$file\" -o \"$tmp_chd\""
         return 0
     fi
 
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-        if ! PHASE_DEFAULT="Converting" "${CHDMAN_BIN:-chdman}" "$subcmd" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
+    if ! PHASE_DEFAULT="Converting" stdbuf -oL -eL "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
             log ERROR "❌ chdman $subcmd failed for: $file"
             return 1
         fi
     else
-        if ! "${CHDMAN_BIN:-chdman}" "$subcmd" -i "$file" -o "$tmp_chd"; then
+        if ! "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd"; then
             log ERROR "❌ chdman $subcmd failed for: $file"
             return 1
         fi
     fi
 
+    sync
+    sleep 1
     return 0
 }
 
@@ -1035,7 +1126,7 @@ process_input() {
             # We also skip scanning extracted files in dry-run (no filesystem changes exist).
             # But keep expected_chds populated from archive listing (already done above).
         else
-            temp_dir="$(mktemp -d -t "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
+            temp_dir="$(mktemp -d -p "$TMPDIR" "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
             log INFO "📦 Extracting $input_file to $temp_dir"
             TEMP_DIRS+=("$temp_dir")
             case "$ext" in
@@ -1043,6 +1134,9 @@ process_input() {
                 rar) unrar x -o+ "$input_file" "$temp_dir" >/dev/null ;;
                 7z|7zip) 7z x -y -o"$temp_dir" "$input_file" >/dev/null ;;
             esac
+
+            log DEBUG "🧹 Flushing extraction buffers to free up RAM..."
+            sync
 
             read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
             mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
