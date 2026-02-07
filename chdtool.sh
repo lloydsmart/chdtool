@@ -971,30 +971,33 @@ convert_disc_file() {
     # Decide CD vs DVD and pick subcommand + icon
     local disc_type
     disc_type="$(detect_disc_type "$file")"
+    local hunk_size=2448 #Default
 
     local subcmd icon
-    if [[ "$disc_type" == "dvd" ]]; then
-        log DEBUG "DVD detected, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
-        if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
-            subcmd="createdvd"
-            icon="📀"  # DVD
-        else
-            log WARN "⚠️ Detected DVD image but this chdman lacks 'createdvd'. Skipping: $file"
-            failures=$((failures + 1))
-            return 1
-        fi
-    else
-        subcmd="createcd"
-        icon="💿"      # CD
-    fi
-
-    # Default hunk size
-    local hunk_size=2448
-
     case "$disc_type" in
-        ps2|psp|dvd) hunk_size=2048 ;; # DVD-ROM and PS2/PSP discs use standard 2K data sectors
-        ps1|dreamcast|segacd|saturn|cd) hunk_size=2448 ;; # CD-ROMs use 2352-byte raw sectors but chdman createcd expects 2448 to include subchannel data for full disc preservation
-        *) log WARN "⚠️ Unknown disc type detected, defaulting to CD settings: $file" ;;
+        ps2|psp|dvd)
+            log DEBUG "DVD detected, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
+            if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
+                subcmd="createdvd"
+                hunk_size=2048 # DVD-ROM and PS2/PSP discs use standard 2K data sectors
+                icon="📀"
+            else
+                log WARN "⚠️ Detected DVD image but this chdman lacks 'createdvd'. Skipping: $file"
+                failures=$((failures + 1))
+                return 1
+            fi
+            ;;
+        ps1|dreamcast|segacd|saturn|cd)
+            subcmd="createcd"
+            hunk_size=2448 # CD-ROMs use 2352-byte raw sectors but chdman createcd expects 2448 to include subchannel data for full disc preservation
+            icon="💿"
+            ;;
+        *)
+            log WARN "⚠️ Unknown disc type detected, defaulting to CD settings: $file"
+            subcmd="createcd"
+            hunk_size=2448
+            icon="💿"
+            ;;
     esac
 
     log INFO "$icon Detected $disc_type image → using chdman $subcmd"
