@@ -57,7 +57,6 @@ fi
 # Use a disk-based temp directory to avoid filling up RAM
 TMPDIR="/var/tmp/chdtool"
 mkdir -p "$TMPDIR"
-check_temp_storage "$TMPDIR"
 
 LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
 
@@ -318,6 +317,22 @@ get_file_size() {
         stat -f%z "$1"
     fi
 }
+
+check_temp_storage() {
+    local tmp_dir="$1"
+    local fs_type
+    fs_type=$(df -T "$tmp_dir" | awk 'NR==2 {print $2}')
+
+    if [[ "$fs_type" == "tmpfs" ]]; then
+        local tmp_limit
+        tmp_limit=$(df -h "$tmp_dir" | awk 'NR==2 {print $4}')
+        log WARN "⚠️ $tmp_dir is a RAM disk (tmpfs). Extracted ISOs will consume physical RAM!"
+        log WARN "💡 Available space in RAM disk: $tmp_limit"
+
+        # Force thread reduction if we are in a RAM disk
+        IS_RAM_DISK=true
+    fi
+} check_temp_storage "$TMPDIR"
 
 # ---------- chdman progress handling ----------
 # Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
@@ -896,22 +911,6 @@ detect_disc_type() {
 
     # Unknown extension → default to CD (safe for createcd)
     echo "cd"
-}
-
-check_temp_storage() {
-    local tmp_dir="$1"
-    local fs_type
-    fs_type=$(df -T "$tmp_dir" | awk 'NR==2 {print $2}')
-
-    if [[ "$fs_type" == "tmpfs" ]]; then
-        local tmp_limit
-        tmp_limit=$(df -h "$tmp_dir" | awk 'NR==2 {print $4}')
-        log WARN "⚠️ $tmp_dir is a RAM disk (tmpfs). Extracted ISOs will consume physical RAM!"
-        log WARN "💡 Available space in RAM disk: $tmp_limit"
-
-        # Force thread reduction if we are in a RAM disk
-        IS_RAM_DISK=true
-    fi
 }
 
 convert_disc_file() {
