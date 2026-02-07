@@ -416,7 +416,7 @@ _chdman_progress_filter() {
 
     local last_draw=0 phase="${PHASE_DEFAULT:-Compressing}" ratio="" progress_active=0 ms
 
-    while IFS= read -r line || [[ -n "$line" ]]; do
+    while IFS= read -d $'\r' -r line || [[ -n "$line" ]]; do
         if [[ "$line" =~ ([0-9]+([.][0-9]+)?)%[[:space:]]*complete ]]; then
             local pct="${BASH_REMATCH[1]}"
             [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
@@ -1032,7 +1032,7 @@ convert_disc_file() {
     fi
 
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-        if ! PHASE_DEFAULT="Converting" "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
+    if ! PHASE_DEFAULT="Converting" stdbuf -oL -eL "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
             log ERROR "❌ chdman $subcmd failed for: $file"
             return 1
         fi
