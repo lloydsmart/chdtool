@@ -11,6 +11,7 @@ KEEP_ORIGINALS=false
 RECURSIVE=false
 DRY_RUN=false
 INPUT_DIR=""
+IS_RAM_DISK=false
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 CHDMAN_MSG_LEVEL="${CHDMAN_MSG_LEVEL:-DEBUG}"
 case "${CHDMAN_MSG_LEVEL^^}" in
@@ -316,6 +317,24 @@ get_file_size() {
         stat -f%z "$1"
     fi
 }
+
+check_temp_storage() {
+    local tmp_dir="$1"
+    local fs_type
+    fs_type=$(df -T "$tmp_dir" | awk 'NR==2 {print $2}')
+
+    if [[ "$fs_type" == "tmpfs" ]]; then
+        local tmp_limit
+        tmp_limit=$(df -h "$tmp_dir" | awk 'NR==2 {print $4}')
+        log WARN "⚠️ $tmp_dir is a RAM disk (tmpfs). Extracted ISOs will consume physical RAM!"
+        log WARN "💡 Available space in RAM disk: $tmp_limit"
+
+        # Force thread reduction if we are in a RAM disk
+        IS_RAM_DISK=true
+    fi
+}
+
+check_temp_storage "$TMPDIR"
 
 # ---------- chdman progress handling ----------
 # Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
@@ -948,18 +967,43 @@ convert_disc_file() {
     log INFO "$icon Detected $disc_type image → using chdman $subcmd"
     log INFO "🔧 Converting: $file -> $tmp_chd"
 
+    # Calculate safe threads: ~one thread per 2GB RAM (for CDs) or 4GB RAM (for DVDs)
+    local total_ram_mb=$(( $(awk '/MemTotal|SwapTotal/{sum+=$2} END{print sum}' /proc/meminfo) / 1024 ))
+    local available_ram=$total_ram_mb
+
+    if [[ "$IS_RAM_DISK" == true ]]; then
+        local iso_size_mb=$(( $(stat -c%s "$file") / 1048576 ))
+        (( available_ram = total_ram_mb - iso_size_mb))
+        log DEBUG "📉 RAM disk detected. Adjusting available RAM for chdman to ${available_ram}MB"
+    fi
+
+    local cpu_cores
+    cpu_cores=$(nproc)
+    local ram_per_thread=2048   # Default for CDs
+
+    if [[ "$subcmd" == "createdvd" ]]; then
+        ram_per_thread=4096  # 4GB floor for DVDs (LZMA is a beast here)
+    fi
+
+    # Calculate threads based on RAM (aiming for ~3GB per thread)
+    local threads=$(( available_ram / ram_per_thread ))
+    (( threads < 1 )) && threads=1
+    (( threads > cpu_cores )) && threads=$cpu_cores
+
     if [[ "$DRY_RUN" == true ]]; then
-        log INFO "🧪 (dry-run) Would run: ${CHDMAN_BIN:-chdman} $subcmd -i \"$file\" -o \"$tmp_chd\""
+        log INFO "🧪 (dry-run) Would run: ${CHDMAN_BIN:-chdman} $subcmd -np $threads -i \"$file\" -o \"$tmp_chd\""
         return 0
     fi
 
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-        if ! PHASE_DEFAULT="Converting" "${CHDMAN_BIN:-chdman}" "$subcmd" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
+        # Added -np "$threads" here
+        if ! PHASE_DEFAULT="Converting" "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
             log ERROR "❌ chdman $subcmd failed for: $file"
             return 1
         fi
     else
-        if ! "${CHDMAN_BIN:-chdman}" "$subcmd" -i "$file" -o "$tmp_chd"; then
+        # Added -np "$threads" here as well
+        if ! "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -i "$file" -o "$tmp_chd"; then
             log ERROR "❌ chdman $subcmd failed for: $file"
             return 1
         fi
@@ -1054,6 +1098,9 @@ process_input() {
                 rar) unrar x -o+ "$input_file" "$temp_dir" >/dev/null ;;
                 7z|7zip) 7z x -y -o"$temp_dir" "$input_file" >/dev/null ;;
             esac
+
+            log debug "🧹 Flushing extraction buffers to free up RAM..."
+            sync
 
             read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
             mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
