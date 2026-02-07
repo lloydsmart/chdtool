@@ -874,28 +874,37 @@ validate_cue_file() {
 }
 
 detect_disc_type() {
-    # Echo "cd" or "dvd" based on the image
     local img="$1"
-    local ext="${img##*.}"
-    ext="${ext,,}"
-
-    # CUE/CCD/GDI are CD-type
+    local ext="${img##*.}"; ext="${ext,,}"
+    
+    #1. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
     case "$ext" in
         cue|ccd|gdi) echo "cd"; return 0 ;;
     esac
 
-    if [[ "$ext" == "iso" ]]; then
-        # Prefer 'file' if available
+    #2. Console Fingerprinting
+    # Reading the first 64KB covers Volume Descriptors and Boot Headers
+    local header
+    header=$(head -c 65535 "$img" 2>/dev/null | tr -d '\0')
+
+    case "$header" in
+        *"PLAYSTATION 2"*|*"NTSC-U/C PS2 DVD"*) echo "ps2"; return 0 ;;
+        *"PLAYSTATION "*|*"NTSC-U/C PS1 CD"*) echo "ps1"; return 0 ;;
+        *"SEGA MEGA-CD"*) echo "segacd"; return 0 ;;
+        *"SEGA SEGAKATANA"*) echo "dreamcast"; return 0 ;;
+        *"SEGA SEGASATURN"*) echo "saturn"; return 0 ;;
+        *"PSP GAME"*|*"UMD VIDEO"*) echo "psp"; return 0 ;;
+    esac
+
+    #3. UDF/ISO logic fallback
+    if [[ "$ext" =="iso" ]]; then
         if command -v file >/dev/null 2>&1; then
             local sig
             sig="$(file -b -- "$img" 2>/dev/null || true)"
-            if echo "$sig" | grep -qi 'UDF filesystem'; then
-                echo "dvd"; return 0
-            fi
+            [[ "$sig" =~ "UDF filesystem" ]] && { echo "dvd"; return 0; }
         else
-            # Fallback: sniff for UDF "NSR0[23]" anchor near sector 256
             local anchor_offset=$((256 * 2048))
-            if dd if="$img" bs=1 skip="$anchor_offset" count=$((64 * 1024)) status=none 2>/dev/null \
+            if dd if="$img" bs=1 skip="$anchor_offset" count=65535 status=none 2>/dev/null \
                 | grep -aqE 'NSR0(2|3)?'; then
                 echo "dvd"; return 0
             fi
@@ -904,15 +913,11 @@ detect_disc_type() {
         # Size heuristic: ≥ ~1 GB → likely DVD; otherwise CD
         local sz
         sz=$(get_file_size "$img")
-        if (( sz >= 1000000000 )); then
-            echo "dvd"; return 0
-        fi
-
-        echo "cd"; return 0
+        (( sz >= 1000000000 )) && { echo "dvd"; return 0; }
     fi
 
-    # Unknown extension → default to CD (safe for createcd)
-    echo "cd"
+    # Unknown extension → default to CD (safe for createcd)    
+    echo "cd"; return 0
 }
 
 convert_disc_file() {
@@ -964,6 +969,15 @@ convert_disc_file() {
         icon="💿"      # CD
     fi
 
+    # Default hunk size (CD-ROM raw sector)
+    local hunk_size=2352
+
+    case "$disc_type" in
+        ps2|psp|dvd) hunk_size=2048 ;; # DVD-ROM and PS2/PSP discs use standard 2K data sectors
+        ps1|dreamcast|segacd|saturn|cd) hunk_size=2352 ;; # CD-ROMs use 2352-byte raw sectors
+        *) log WARN "⚠️ Unknown disc type detected, defaulting to CD settings: $file" ;;
+    esac
+
     log INFO "$icon Detected $disc_type image → using chdman $subcmd"
     log INFO "🔧 Converting: $file -> $tmp_chd"
 
@@ -996,19 +1010,17 @@ convert_disc_file() {
     fi
 
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-        # Added -np "$threads" here
-        if ! PHASE_DEFAULT="Converting" "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
+        if ! PHASE_DEFAULT="Converting" "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
             log ERROR "❌ chdman $subcmd failed for: $file"
             return 1
         fi
     else
-        # Added -np "$threads" here as well
-        if ! "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -i "$file" -o "$tmp_chd"; then
+        if ! "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd"; then
             log ERROR "❌ chdman $subcmd failed for: $file"
             return 1
         fi
     fi
-
+    
     return 0
 }
 
