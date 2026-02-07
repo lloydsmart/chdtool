@@ -1019,7 +1019,9 @@ convert_disc_file() {
             return 1
         fi
     fi
-    
+
+    sync
+    sleep 1
     return 0
 }
 
@@ -1110,7 +1112,7 @@ process_input() {
                 7z|7zip) 7z x -y -o"$temp_dir" "$input_file" >/dev/null ;;
             esac
 
-            log debug "🧹 Flushing extraction buffers to free up RAM..."
+            log DEBUG "🧹 Flushing extraction buffers to free up RAM..."
             sync
 
             read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
