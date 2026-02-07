@@ -332,7 +332,9 @@ check_temp_storage() {
         # Force thread reduction if we are in a RAM disk
         IS_RAM_DISK=true
     fi
-} check_temp_storage "$TMPDIR"
+}
+
+check_temp_storage "$TMPDIR"
 
 # ---------- chdman progress handling ----------
 # Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
