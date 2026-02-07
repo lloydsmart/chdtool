@@ -56,6 +56,7 @@ fi
 # Use a disk-based temp directory to avoid filling up RAM
 TMPDIR="/var/tmp/chdtool"
 mkdir -p "$TMPDIR"
+check_temp_storage "$TMPDIR"
 
 LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
 
@@ -896,6 +897,22 @@ detect_disc_type() {
     echo "cd"
 }
 
+check_temp_storage() {
+    local tmp_dir="$1"
+    local fs_type
+    fs_type=$(df -T "$tmp_dir" | awk 'NR==2 {print $2}')
+
+    if [[ "$fs_type" == "tmpfs" ]]; then
+        local tmp_limit
+        tmp_limit=$(df -h "$tmp_dir" | awk 'NR==2 {print $4}')
+        log WARN "⚠️ $tmp_dir is a RAM disk (tmpfs). Extracted ISOs will consume physical RAM!"
+        log WARN "💡 Available space in RAM disk: $tmp_limit"
+
+        # Force thread reduction if we are in a RAM disk
+        IS_RAM_DISK=true
+    fi
+}
+
 convert_disc_file() {
     local file="$1"
     local outdir="$2"
@@ -950,10 +967,23 @@ convert_disc_file() {
 
     # Calculate safe threads: ~one thread per 3GB RAM
     local total_ram_mb=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 ))
+    local available_ram=$total_ram_mb
+
+    if [[ "$IS_RAM_DISK" == true ]]; then
+        local iso_size_mb=$(( $(stat -c%s "$file") / 1048576 ))
+        (( available_ram = total_ram_mb - iso_size_mb))
+        log DEBUG "📉 RAM disk detected. Adjusting available RAM for chdman to ${available_ram}MB"
+    fi
+
     local cpu_cores=$(nproc)
+    local ram_per_thread=3072   # Default for CDs
+
+    if [[ "$subcmd" == "createdvd" ]]; then
+        ram_per_thread=6144  # 6GB floor for DVDs (LZMA is a beast here)
+    fi
 
     # Calculate threads based on RAM (aiming for ~3GB per thread)
-    local threads=$(( total_ram_mb / 3072 ))
+    local threads=$(( available_ram / ram_per_thread ))
     (( threads < 1 )) && threads=1
     (( threads > cpu_cores )) && threads=$cpu_cores
 
