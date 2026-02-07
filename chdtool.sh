@@ -875,28 +875,44 @@ validate_cue_file() {
 
 detect_disc_type() {
     local img="$1"
-    local ext="${img##*.}"; ext="${ext,,}"
+    local ext
+    ext="${img##*.}"; ext="${ext,,}"
+    local sz
+    sz=$(get_file_size "$img" 2>/dev/null || echo 0)
     
-    #1. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
+    #1. Size-based "hard limits"
+    # If it's > 1GB, it's a DVD/PS2 regardless of what the header says (some PS2 games have weird headers that look like CDs)
+    local is_large_disc=false
+    (( sz >= 1000000000 )) && is_large_disc=true
+
+    #2. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
     case "$ext" in
         cue|ccd|gdi) echo "cd"; return 0 ;;
     esac
 
-    #2. Console Fingerprinting
+    #3. Console Fingerprinting
     # Reading the first 64KB covers Volume Descriptors and Boot Headers
     local header
     header=$(head -c 65535 "$img" 2>/dev/null | tr -d '\0')
 
     case "$header" in
         *"PLAYSTATION 2"*|*"NTSC-U/C PS2 DVD"*) echo "ps2"; return 0 ;;
-        *"PLAYSTATION "*|*"NTSC-U/C PS1 CD"*) echo "ps1"; return 0 ;;
+        *"PLAYSTATION "*|*"NTSC-U/C PS1 CD"*)
+            # If it says PS1 but it's >1GB, it's a mislabeled PS2 DVD
+            if [[ "$is_large_disc" == true ]]; then
+                log WARN "⚠️ Header indicates PS1 but size suggests PS2 DVD. Treating as PS2: $img"
+                echo "ps2"
+            else
+                echo "ps1"
+            fi
+            return 0 ;;
         *"SEGA MEGA-CD"*) echo "segacd"; return 0 ;;
         *"SEGA SEGAKATANA"*) echo "dreamcast"; return 0 ;;
         *"SEGA SEGASATURN"*) echo "saturn"; return 0 ;;
         *"PSP GAME"*|*"UMD VIDEO"*) echo "psp"; return 0 ;;
     esac
 
-    #3. UDF/ISO logic fallback
+    #4. UDF/ISO logic fallback
     if [[ "$ext" == "iso" ]]; then
         if command -v file >/dev/null 2>&1; then
             local sig
@@ -915,8 +931,12 @@ detect_disc_type() {
         (( sz >= 1000000000 )) && { echo "dvd"; return 0; }
     fi
 
-    # Unknown extension → default to CD (safe for createcd)    
-    echo "cd"; return 0
+    # Unknown extension → default to CD (safe for createcd)
+    if [[ "$is_large_disc" == true ]]; then
+        echo "dvd"; return 0
+    else
+        echo "cd"; return 0
+    fi
 }
 
 convert_disc_file() {
@@ -968,12 +988,12 @@ convert_disc_file() {
         icon="💿"      # CD
     fi
 
-    # Default hunk size (CD-ROM raw sector)
-    local hunk_size=2352
+    # Default hunk size
+    local hunk_size=2448
 
     case "$disc_type" in
         ps2|psp|dvd) hunk_size=2048 ;; # DVD-ROM and PS2/PSP discs use standard 2K data sectors
-        ps1|dreamcast|segacd|saturn|cd) hunk_size=2352 ;; # CD-ROMs use 2352-byte raw sectors
+        ps1|dreamcast|segacd|saturn|cd) hunk_size=2448 ;; # CD-ROMs use 2352-byte raw sectors but chdman createcd expects 2448 to include subchannel data for full disc preservation
         *) log WARN "⚠️ Unknown disc type detected, defaulting to CD settings: $file" ;;
     esac
 
