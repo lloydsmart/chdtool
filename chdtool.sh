@@ -11,6 +11,7 @@ KEEP_ORIGINALS=false
 RECURSIVE=false
 DRY_RUN=false
 INPUT_DIR=""
+IS_RAM_DISK=false
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 CHDMAN_MSG_LEVEL="${CHDMAN_MSG_LEVEL:-DEBUG}"
 case "${CHDMAN_MSG_LEVEL^^}" in
