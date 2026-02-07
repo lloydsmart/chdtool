@@ -897,15 +897,14 @@ detect_disc_type() {
     esac
 
     #3. UDF/ISO logic fallback
-    if [[ "$ext" =="iso" ]]; then
+    if [[ "$ext" == "iso" ]]; then
         if command -v file >/dev/null 2>&1; then
             local sig
             sig="$(file -b -- "$img" 2>/dev/null || true)"
-            [[ "$sig" =~ "UDF filesystem" ]] && { echo "dvd"; return 0; }
+            [[ "$sig" == *"UDF filesystem"* ]] && { echo "dvd"; return 0; }
         else
-            local anchor_offset=$((256 * 2048))
-            if dd if="$img" bs=1 skip="$anchor_offset" count=65535 status=none 2>/dev/null \
-                | grep -aqE 'NSR0(2|3)?'; then
+            if dd if="$img" bs=2048 skip=256 count=32 status=none 2>/dev/null \
+                | tr -d '\0' | grep -qE 'NSR0(2|3)?'; then
                 echo "dvd"; return 0
             fi
         fi
