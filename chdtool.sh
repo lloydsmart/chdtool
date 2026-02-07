@@ -967,8 +967,8 @@ convert_disc_file() {
     log INFO "$icon Detected $disc_type image → using chdman $subcmd"
     log INFO "🔧 Converting: $file -> $tmp_chd"
 
-    # Calculate safe threads: ~one thread per 3GB RAM
-    local total_ram_mb=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 ))
+    # Calculate safe threads: ~one thread per 2GB RAM (for CDs) or 4GB RAM (for DVDs)
+    local total_ram_mb=$(( $(awk '/MemTotal|SwapTotal/{sum+=$2} END{print sum}' /proc/meminfo) / 1024 ))
     local available_ram=$total_ram_mb
 
     if [[ "$IS_RAM_DISK" == true ]]; then
