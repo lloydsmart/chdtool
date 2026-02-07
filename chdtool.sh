@@ -897,7 +897,7 @@ detect_disc_type() {
 
     case "$header" in
         *"PLAYSTATION 2"*|*"NTSC-U/C PS2 DVD"*) echo "ps2"; return 0 ;;
-        *"PLAYSTATION "*|*"NTSC-U/C PS1 CD"*)
+        *"PLAYSTATION  "*|*"NTSC-U/C PS1 CD"*)
             # If it says PS1 but it's >1GB, it's a mislabeled PS2 DVD
             if [[ "$is_large_disc" == true ]]; then
                 log WARN "⚠️ Header indicates PS1 but size suggests PS2 DVD. Treating as PS2: $img"
