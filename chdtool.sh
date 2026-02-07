@@ -953,6 +953,11 @@ convert_disc_file() {
         return 0
     fi
 
+    # Apply memory limit for DVDs only
+    if [[ "$disc_type" == "dvd" ]]; then
+        ulimit -Sv 8000000  # 8GB limit
+    fi
+
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
         if ! PHASE_DEFAULT="Converting" "${CHDMAN_BIN:-chdman}" "$subcmd" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
             log ERROR "❌ chdman $subcmd failed for: $file"
