@@ -978,10 +978,10 @@ convert_disc_file() {
     fi
 
     local cpu_cores=$(nproc)
-    local ram_per_thread=3072   # Default for CDs
+    local ram_per_thread=2048   # Default for CDs
 
     if [[ "$subcmd" == "createdvd" ]]; then
-        ram_per_thread=6144  # 6GB floor for DVDs (LZMA is a beast here)
+        ram_per_thread=4096  # 4GB floor for DVDs (LZMA is a beast here)
     fi
 
     # Calculate threads based on RAM (aiming for ~3GB per thread)
