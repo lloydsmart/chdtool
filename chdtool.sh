@@ -977,7 +977,8 @@ convert_disc_file() {
         log DEBUG "📉 RAM disk detected. Adjusting available RAM for chdman to ${available_ram}MB"
     fi
 
-    local cpu_cores=$(nproc)
+    local cpu_cores
+    cpu_cores=$(nproc)
     local ram_per_thread=2048   # Default for CDs
 
     if [[ "$subcmd" == "createdvd" ]]; then
