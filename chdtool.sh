@@ -886,22 +886,25 @@ detect_disc_type() {
     #1. Size-based "hard limits"
     # If it's > 1GB, it's a DVD/PS2 regardless of what the header says (some PS2 games have weird headers that look like CDs)
     local is_large_disc=false
-    if [[ -n "$sz" ]] && (( sz >= 1000000000 )); then
-        is_large_disc=true
-    fi
+    (( sz >= 1000000000 )) && is_large_disc=true
     # --- DEBUGGING ---
     log DEBUG "is_large_disc for $(basename "$img"): $is_large_disc (size: $sz bytes)"
     # -----------------
 
-    #2. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
-    case "$ext" in
-        cue|ccd|gdi) echo "cd"; return 0 ;;
-    esac
+    # Sniff the header before checking extensions
+    local sniff_target="$img"
+    # If it's a CUE, we need to sniff the first referenced file instead (usually BIN) to get the real disc type
+    if [[ "$ext" == "cue" ]]; then
+        # Grab the first filename inside the CUE (usually the main data track)
+        local bin_path
+        bin_path="$(dirname "$img")/$(awk -F'"' '/^FILE/{print $2; exit}' "$img")"
+        [[ -f "$bin_path" ]] && sniff_target="$bin_path"
+    fi
 
-    #3. Console Fingerprinting
+    #2. Console Fingerprinting
     # Reading the first 64KB covers Volume Descriptors and Boot Headers
     local header
-    header=$(head -c 65535 "$img" 2>/dev/null | tr -d '\0')
+    header=$(head -c 65535 "$sniff_target" 2>/dev/null | tr -d '\0')
 
     case "$header" in
         *"PLAYSTATION 2"*|*"NTSC-U/C PS2 DVD"*) echo "ps2"; return 0 ;;
@@ -918,6 +921,11 @@ detect_disc_type() {
         *"SEGA SEGAKATANA"*) echo "dreamcast"; return 0 ;;
         *"SEGA SEGASATURN"*) echo "saturn"; return 0 ;;
         *"PSP GAME"*|*"UMD VIDEO"*) echo "psp"; return 0 ;;
+    esac
+
+    #3. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
+    case "$ext" in
+        cue|ccd|gdi) echo "cd"; return 0 ;;
     esac
 
     #4. UDF/ISO logic fallback
