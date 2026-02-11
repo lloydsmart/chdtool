@@ -1153,11 +1153,28 @@ process_input() {
             temp_dir="$(mktemp -d -p "$TMPDIR" "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
             log INFO "📦 Extracting $input_file to $temp_dir"
             TEMP_DIRS+=("$temp_dir")
+            local extraction_exit=0
             case "$ext" in
-                zip) unzip -qq "$input_file" -d "$temp_dir" ;;
-                rar) unrar x -o+ "$input_file" "$temp_dir" >/dev/null ;;
-                7z|7zip) 7z x -y -o"$temp_dir" "$input_file" >/dev/null ;;
+                zip)
+                    unzip -qq "$input_file" -d "$temp_dir"
+                    extraction_exit=$?
+                    ;;
+                rar)
+                    unrar x -o+ "$input_file" "$temp_dir" >/dev/null
+                    extraction_exit=$?
+                    ;;
+                7z|7zip)
+                    7z x -y -o"$temp_dir" "$input_file" >/dev/null
+                    extraction_exit=$?
+                    ;;
             esac
+
+            # Strict validation: Abort if the extraction tool retrned an error code, which likely means the archive is corrupted or password-protected.
+            if [[ $extraction_exit -ne 0 ]]; then
+                log ERROR "❌ Extraction failed for $input_file (Exit code: $extraction_exit). Skipping."
+                failures=$((failures + 1))
+                return 1
+            fi
 
             log DEBUG "🧹 Flushing extraction buffers to free up RAM..."
             sync
