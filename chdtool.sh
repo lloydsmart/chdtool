@@ -892,19 +892,37 @@ detect_disc_type() {
     # -----------------
 
     # Sniff the header before checking extensions
+    # --- UPDATED SNIFF LOGIC WITH DEBUGGING ---
     local sniff_target="$img"
-    # If it's a CUE, we need to sniff the first referenced file instead (usually BIN) to get the real disc type
     if [[ "$ext" == "cue" ]]; then
-        # Grab the first filename inside the CUE (usually the main data track)
+        local raw_bin_name
+        raw_bin_name=$(awk -F'"' '/^FILE/{print $2; exit}' "$img")
+        
         local bin_path
-        bin_path="$(dirname "$img")/$(awk -F'"' '/^FILE/{print $2; exit}' "$img")"
-        [[ -f "$bin_path" ]] && sniff_target="$bin_path"
+        bin_path="$(dirname "$img")/$raw_bin_name"
+        
+        log DEBUG "DEBUG: CUE refers to file: [$raw_bin_name]"
+        log DEBUG "DEBUG: Full resolved bin_path: [$bin_path]"
+
+        if [[ -f "$bin_path" ]]; then
+            log DEBUG "DEBUG: Successfully found BIN file. Switching sniff_target."
+            sniff_target="$bin_path"
+        else
+            log DEBUG "DEBUG: FAILED to find BIN file at that path."
+            log DEBUG "DEBUG: Directory contents of $(dirname "$img"): $(ls -m "$(dirname "$img")")"
+        fi
     fi
 
     #2. Console Fingerprinting
     # Reading the first 64KB covers Volume Descriptors and Boot Headers
     local header
     header=$(head -c 65535 "$sniff_target" 2>/dev/null | tr -d '\0')
+
+    # Check for PS2 specifically in debug
+    if [[ "$header" == *"PLAYSTATION 2"* ]]; then
+        log DEBUG "DEBUG: 'PLAYSTATION 2' string found in header of $(basename "$sniff_target")"
+    fi
+    # ------------------------------------------
 
     case "$header" in
         *"PLAYSTATION 2"*|*"NTSC-U/C PS2 DVD"*) echo "ps2"; return 0 ;;
