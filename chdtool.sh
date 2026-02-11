@@ -874,6 +874,7 @@ validate_cue_file() {
 }
 
 detect_disc_type() {
+    log DEBUG "DEBUG: Starting detection for: $1"
     local img="$1"
     local ext
     ext="${img##*.}"; ext="${ext,,}"
