@@ -975,7 +975,30 @@ convert_disc_file() {
 
     local subcmd icon
     case "$disc_type" in
-        ps2|psp|dvd)
+        ps2)
+            # PS2 is the special case; Hunk is ALWAYS 2048, but command depends on size
+            log DEBUG "PS2 image detected, checking size to determine if DVD structure is likely"
+            local sz
+            sz=$(get_file_size "$file")
+            hunk_size=2048
+            if (( sz >= 1000000000 )); then
+                log DEBUG "Large PS2 image suggests DVD structure, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
+                if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
+                    log DEBUG "Using createdvd for large PS2 image"
+                    subcmd="createdvd"
+                    icon="📀"
+                else
+                    log WARN "⚠️ PS2 DVD detected but chdman lacks 'createdvd'. Skipping $file."
+                    failures=$((failures + 1))
+                    return 1
+                fi
+            else
+                log DEBUG "Smaller PS2 image suggests CD structure, using createcd"
+                subcmd="createcd"
+                icon="💿"
+            fi
+            ;;
+        psp|dvd)
             log DEBUG "DVD detected, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
             if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
                 subcmd="createdvd"
@@ -988,6 +1011,7 @@ convert_disc_file() {
             fi
             ;;
         ps1|dreamcast|segacd|saturn|cd)
+            log DEBUG "CD-type image detected, using createcd"
             subcmd="createcd"
             hunk_size=2448 # CD-ROMs use 2352-byte raw sectors but chdman createcd expects 2448 to include subchannel data for full disc preservation
             icon="💿"
@@ -1137,6 +1161,7 @@ process_input() {
 
             log DEBUG "🧹 Flushing extraction buffers to free up RAM..."
             sync
+            sleep 1
 
             read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
             mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
