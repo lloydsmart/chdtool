@@ -879,11 +879,19 @@ detect_disc_type() {
     ext="${img##*.}"; ext="${ext,,}"
     local sz
     sz=$(get_file_size "$img" 2>/dev/null || echo 0)
-    
+    # --- DEBUGGING ---
+    log DEBUG "sz value for $(basename "$img"): [${sz}]"
+    # -----------------
+
     #1. Size-based "hard limits"
     # If it's > 1GB, it's a DVD/PS2 regardless of what the header says (some PS2 games have weird headers that look like CDs)
     local is_large_disc=false
-    (( sz >= 1000000000 )) && is_large_disc=true
+    if [[ -n "$sz" ]] && (( sz >= 1000000000 )); then
+        is_large_disc=true
+    fi
+    # --- DEBUGGING ---
+    log DEBUG "is_large_disc for $(basename "$img"): $is_large_disc (size: $sz bytes)"
+    # -----------------
 
     #2. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
     case "$ext" in
@@ -926,17 +934,11 @@ detect_disc_type() {
         fi
 
         # Size heuristic: ≥ ~1 GB → likely DVD; otherwise CD
-        local sz
-        sz=$(get_file_size "$img")
-        (( sz >= 1000000000 )) && { echo "dvd"; return 0; }
+        [[ "$is_large_disc" == true ]] && { echo "dvd"; return 0; }
     fi
 
-    # Unknown extension → default to CD (safe for createcd)
-    if [[ "$is_large_disc" == true ]]; then
-        echo "dvd"; return 0
-    else
-        echo "cd"; return 0
-    fi
+    #5 Final fallback: Unknown extension → default to CD (safe for createcd)
+    [[ "$is_large_disc" == true ]] && echo "dvd" || echo "cd"
 }
 
 convert_disc_file() {
