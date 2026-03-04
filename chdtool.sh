@@ -55,7 +55,7 @@ if [[ ! -d "$INPUT_DIR" ]]; then
 fi
 
 # Use a disk-based temp directory to avoid filling up RAM
-TMPDIR="/var/tmp/chdtool"
+TMPDIR="${TMPDIR:-/var/tmp/chdtool}"
 mkdir -p "$TMPDIR"
 
 LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
