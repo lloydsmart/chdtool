@@ -264,19 +264,15 @@ fi
 # Detect 'createdvd' capability (newer chdman versions)
 CHDMAN_HAS_CREATEDVD=false
 if command -v chdman >/dev/null 2>&1; then
-  set +o pipefail
-  if chdman -help 2>&1 | grep -qiE 'createdvd'; then
-      log DEBUG "Found 'createdvd' in chdman -help output"
-      CHDMAN_HAS_CREATEDVD=true
-  else
-      log DEBUG "Did NOT find 'createdvd' in chdman -help output"
-      CHDMAN_HAS_CREATEDVD=false
-  fi
-  set -o pipefail
-  log DEBUG "ℹ️ chdman createdvd support: $CHDMAN_HAS_CREATEDVD"
+    if chdman help createdvd >/dev/null 2>&1; then
+        CHDMAN_HAS_CREATEDVD=true
+        log DEBUG "ℹ️ chdman createdvd support: true (via 'chdman help createdvd')"
+    else
+        CHDMAN_HAS_CREATEDVD=false
+        log DEBUG "ℹ️ chdman createdvd support: false (no 'createdvd' help topic)"
+    fi
 else
-  # In dry-run without chdman, just log at DEBUG and keep default false
-  [[ "$DRY_RUN" == true ]] && log DEBUG "ℹ️ chdman not present (dry-run); assuming no createdvd"
+    [[ "$DRY_RUN" == true ]] && log DEBUG "ℹ️ chdman not present (dry-run); assuming no createdvd"
 fi
 
 total_original_size=0
