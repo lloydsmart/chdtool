@@ -265,7 +265,6 @@ fi
 CHDMAN_HAS_CREATEDVD=false
 if command -v chdman >/dev/null 2>&1; then
   set +o pipefail
-  log DEBUG "chdman -help output: $(chdman -help 2>&1)"
   if chdman -help 2>&1 | grep -qiE 'createdvd'; then
       log DEBUG "Found 'createdvd' in chdman -help output"
       CHDMAN_HAS_CREATEDVD=true
