@@ -329,6 +329,16 @@ check_temp_storage() {
     fi
 }
 
+archive_entry_to_chd_name() {
+  # $1 = path inside archive, e.g. "CD1/Game.cue"
+  local entry="$1"
+  local stem="${entry%.*}"
+  # preserve subdir info to avoid collisions, but keep it filename-safe
+  stem="${stem//\// - }"
+  stem="$(sanitize_filename "$stem")"
+  printf '%s.chd' "$stem"
+}
+
 check_temp_storage "$TMPDIR"
 
 # ---------- chdman progress handling ----------
@@ -503,7 +513,7 @@ parse_disc_info() {
     # For the compact/union pattern, keep it a single capturing group:
     local re_label_union="(${re_disc_labels:1:-1}|[Vv]ol|[Vv]olume|[Pp]art|[Pp]t\\.?)"
 
-    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?$re_core$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
+    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?$re_disc_labels$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
         local base="${BASH_REMATCH[1]}"
         local num="${BASH_REMATCH[3]}"   # (1=label,2=sep? depends on grouping; ensure index)
         # Because of our grouping above, indexes are:
@@ -964,6 +974,7 @@ detect_disc_type() {
 convert_disc_file() {
     local file="$1"
     local outdir="$2"
+    local base_override="${3:-}"
 
     # If it's a CUE, validate referenced files first
     if [[ "${file,,}" == *.cue ]]; then
@@ -974,7 +985,12 @@ convert_disc_file() {
     fi
 
     local base
-    base="$(get_chd_basename "$file")"
+    if [[ -n "$base_override" ]]; then
+        base="$base_override"
+    else
+        base="$(get_chd_basename "$file")"
+    fi
+
     local chd_path="$outdir/$base.chd"
     local tmp_chd="$outdir/$base.chd.tmp"
 
@@ -1140,7 +1156,7 @@ process_input() {
             7z|7zip) mapfile -t archive_entries < <(7z l -slt -- "$input_file" 2>/dev/null | awk -v IGNORECASE=1 -v re="$ext_regex" '/^Path = /{p=substr($0,8); if(p~re) print p}') ;;
         esac
         for entry in "${archive_entries[@]}"; do
-            expected_chds+=("$(get_chd_basename "$entry").chd")
+            expected_chds+=("$(archive_entry_to_chd_name "$entry")")
         done
     fi
 
@@ -1230,7 +1246,7 @@ process_input() {
         if [[ "$DRY_RUN" == true && ${#archive_entries[@]} -gt 0 ]]; then
             for entry in "${archive_entries[@]}"; do
                 # Mirror the naming used later: basename without extension + .chd
-                log INFO "🧪 (dry-run) Would convert: $entry -> $outdir/$(basename "${entry%.*}").chd"
+                log INFO "🧪 (dry-run) Would convert: $entry -> $outdir/$(archive_entry_to_chd_name "$entry")"
             done
         fi
     fi
@@ -1243,13 +1259,32 @@ process_input() {
             log INFO "🧪 (dry-run) Would convert: $disc -> $outdir/$(basename "${disc%.*}").chd"
         done
     else
-        for disc in "${disc_files[@]}"; do
-            if convert_disc_file "$disc" "$outdir"; then
-                tmp_chds+=("$outdir/$(basename "${disc%.*}").chd.tmp")
-            else
-                input_failed=true
-            fi
-        done
+        if is_in_list "$ext" "${archive_exts[@]}"; then
+            # Drive conversion from archive_entries so output naming matches expected_chds
+            for entry in "${archive_entries[@]}"; do
+                local extracted="$temp_dir/$entry"
+                [[ -f "$extracted" ]] || continue
+
+                local chd_name chd_base
+                chd_name="$(archive_entry_to_chd_name "$entry")"   # e.g. "CD1 - Game.chd"
+                chd_base="${chd_name%.chd}"                        # e.g. "CD1 - Game"
+
+                if convert_disc_file "$extracted" "$outdir" "$chd_base"; then
+                    tmp_chds+=("$outdir/$chd_name.tmp")            # matches final naming
+                else
+                    input_failed=true
+                fi
+            done
+        else
+            # Non-archive inputs keep the old behaviour
+            for disc in "${disc_files[@]}"; do
+                if convert_disc_file "$disc" "$outdir"; then
+                    tmp_chds+=("$outdir/$(basename "${disc%.*}").chd.tmp")
+                else
+                    input_failed=true
+                fi
+            done
+        fi
     fi
 
     # Verify .tmp CHDs and finalize
