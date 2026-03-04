@@ -414,14 +414,14 @@ _now_ms() {
 # Use with: PHASE_DEFAULT="Converting" chdman createcd … | _chdman_progress_filter
 #        or: PHASE_DEFAULT="Verifying"  chdman verify … | _chdman_progress_filter
 _chdman_progress_filter() {
-    # Always re-enable autowrap on exit/interrupt; return non-zero on INT/TERM
     _restore_wrap() { _term_print "\033[?7h"; }
     trap '_restore_wrap; return 130' INT TERM
     trap _restore_wrap EXIT
 
     local last_draw=0 phase="${PHASE_DEFAULT:-Compressing}" ratio="" progress_active=0 ms
 
-    while IFS= read -d $'\r' -r line || [[ -n "$line" ]]; do
+    # Read from a process-substitution so the while-loop stays in THIS shell
+    while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ "$line" =~ ([0-9]+([.][0-9]+)?)%[[:space:]]*complete ]]; then
             local pct="${BASH_REMATCH[1]}"
             [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
@@ -436,16 +436,14 @@ _chdman_progress_filter() {
             continue
         fi
 
-        # Ignore obvious chopped progress fragments
         if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
-            [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
+           [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
             continue
         fi
 
         log "$CHDMAN_MSG_LEVEL" "$line"
-    done
+    done < <(tr $'\r' $'\n')   # CR → NL normalisation happens here
 
-    # At EOF: end the progress line neatly with a single newline
     (( progress_active )) && _term_print "\r\033[2K\n"
 }
 
@@ -771,7 +769,7 @@ verify_chds() {
         log INFO "🔎 Verifying: $chd_path"
         if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
             # TTY: show single-line progress, capture full output to tmp for analysis
-            if PHASE_DEFAULT="Verifying" "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 \
+            if PHASE_DEFAULT="Verifying" stdbuf -oL -eL "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 \
                 | tee "$tmpout" \
                 | _chdman_progress_filter
             then
@@ -803,7 +801,7 @@ verify_chds() {
             : > "$tmpout"
             log INFO "🔎 Verifying: $chd_path"
             if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-                if PHASE_DEFAULT="Verifying" "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 \
+                if PHASE_DEFAULT="Verifying" stdbuf -oL -eL "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 \
                     | tee "$tmpout" \
                     | _chdman_progress_filter
                 then
