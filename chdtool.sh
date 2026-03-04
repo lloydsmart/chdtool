@@ -898,11 +898,12 @@ detect_disc_type() {
     local sniff_target="$img"
     if [[ "$ext" == "cue" ]]; then
         local raw_bin_name
-        raw_bin_name=$(awk -F'"' '/^FILE/{print $2; exit}' "$img")
-        
+        raw_bin_name="$(awk -F'"' 'tolower($1) ~ /^[[:space:]]*file[[:space:]]+/ {print $2; exit}' "$img")"
+
         local bin_path
-        bin_path="$(dirname "$img")/$raw_bin_name"
+        bin_path="$(dirname "$img")/${raw_bin_name//\\//}"
         
+        [[ -z "$raw_bin_name" ]] && log DEBUG "DEBUG: No FILE entry found in CUE: $img"
         log DEBUG "DEBUG: CUE refers to file: [$raw_bin_name]"
         log DEBUG "DEBUG: Full resolved bin_path: [$bin_path]"
 
