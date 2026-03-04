@@ -874,26 +874,56 @@ validate_cue_file() {
 }
 
 detect_disc_type() {
+    log DEBUG "DEBUG: Starting detection for: $1"
     local img="$1"
     local ext
     ext="${img##*.}"; ext="${ext,,}"
     local sz
     sz=$(get_file_size "$img" 2>/dev/null || echo 0)
-    
+    # --- DEBUGGING ---
+    log DEBUG "sz value for $(basename "$img"): [${sz}]"
+    # -----------------
+
     #1. Size-based "hard limits"
     # If it's > 1GB, it's a DVD/PS2 regardless of what the header says (some PS2 games have weird headers that look like CDs)
     local is_large_disc=false
     (( sz >= 1000000000 )) && is_large_disc=true
+    # --- DEBUGGING ---
+    log DEBUG "is_large_disc for $(basename "$img"): $is_large_disc (size: $sz bytes)"
+    # -----------------
 
-    #2. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
-    case "$ext" in
-        cue|ccd|gdi) echo "cd"; return 0 ;;
-    esac
+    # Sniff the header before checking extensions
+    # --- UPDATED SNIFF LOGIC WITH DEBUGGING ---
+    local sniff_target="$img"
+    if [[ "$ext" == "cue" ]]; then
+        local raw_bin_name
+        raw_bin_name=$(awk -F'"' '/^FILE/{print $2; exit}' "$img")
+        
+        local bin_path
+        bin_path="$(dirname "$img")/$raw_bin_name"
+        
+        log DEBUG "DEBUG: CUE refers to file: [$raw_bin_name]"
+        log DEBUG "DEBUG: Full resolved bin_path: [$bin_path]"
 
-    #3. Console Fingerprinting
+        if [[ -f "$bin_path" ]]; then
+            log DEBUG "DEBUG: Successfully found BIN file. Switching sniff_target."
+            sniff_target="$bin_path"
+        else
+            log DEBUG "DEBUG: FAILED to find BIN file at that path."
+            log DEBUG "DEBUG: Directory contents of $(dirname "$img"): $(ls -m "$(dirname "$img")")"
+        fi
+    fi
+
+    #2. Console Fingerprinting
     # Reading the first 64KB covers Volume Descriptors and Boot Headers
     local header
-    header=$(head -c 65535 "$img" 2>/dev/null | tr -d '\0')
+    header=$(head -c 65535 "$sniff_target" 2>/dev/null | tr -d '\0')
+
+    # Check for PS2 specifically in debug
+    if [[ "$header" == *"PLAYSTATION 2"* ]]; then
+        log DEBUG "DEBUG: 'PLAYSTATION 2' string found in header of $(basename "$sniff_target")"
+    fi
+    # ------------------------------------------
 
     case "$header" in
         *"PLAYSTATION 2"*|*"NTSC-U/C PS2 DVD"*) echo "ps2"; return 0 ;;
@@ -912,6 +942,11 @@ detect_disc_type() {
         *"PSP GAME"*|*"UMD VIDEO"*) echo "psp"; return 0 ;;
     esac
 
+    #3. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
+    case "$ext" in
+        cue|ccd|gdi) echo "cd"; return 0 ;;
+    esac
+
     #4. UDF/ISO logic fallback
     if [[ "$ext" == "iso" ]]; then
         if command -v file >/dev/null 2>&1; then
@@ -926,17 +961,11 @@ detect_disc_type() {
         fi
 
         # Size heuristic: ≥ ~1 GB → likely DVD; otherwise CD
-        local sz
-        sz=$(get_file_size "$img")
-        (( sz >= 1000000000 )) && { echo "dvd"; return 0; }
+        [[ "$is_large_disc" == true ]] && { echo "dvd"; return 0; }
     fi
 
-    # Unknown extension → default to CD (safe for createcd)
-    if [[ "$is_large_disc" == true ]]; then
-        echo "dvd"; return 0
-    else
-        echo "cd"; return 0
-    fi
+    #5 Final fallback: Unknown extension → default to CD (safe for createcd)
+    [[ "$is_large_disc" == true ]] && echo "dvd" || echo "cd"
 }
 
 convert_disc_file() {
@@ -975,7 +1004,30 @@ convert_disc_file() {
 
     local subcmd icon
     case "$disc_type" in
-        ps2|psp|dvd)
+        ps2)
+            # PS2 is the special case; Hunk is ALWAYS 2048, but command depends on size
+            log DEBUG "PS2 image detected, checking size to determine if DVD structure is likely"
+            local sz
+            sz=$(get_file_size "$file")
+            hunk_size=2048
+            if (( sz >= 1000000000 )); then
+                log DEBUG "Large PS2 image suggests DVD structure, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
+                if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
+                    log DEBUG "Using createdvd for large PS2 image"
+                    subcmd="createdvd"
+                    icon="📀"
+                else
+                    log WARN "⚠️ PS2 DVD detected but chdman lacks 'createdvd'. Skipping $file."
+                    failures=$((failures + 1))
+                    return 1
+                fi
+            else
+                log DEBUG "Smaller PS2 image suggests CD structure, using createcd"
+                subcmd="createcd"
+                icon="💿"
+            fi
+            ;;
+        psp|dvd)
             log DEBUG "DVD detected, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
             if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
                 subcmd="createdvd"
@@ -988,6 +1040,7 @@ convert_disc_file() {
             fi
             ;;
         ps1|dreamcast|segacd|saturn|cd)
+            log DEBUG "CD-type image detected, using createcd"
             subcmd="createcd"
             hunk_size=2448 # CD-ROMs use 2352-byte raw sectors but chdman createcd expects 2448 to include subchannel data for full disc preservation
             icon="💿"
@@ -1129,14 +1182,32 @@ process_input() {
             temp_dir="$(mktemp -d -p "$TMPDIR" "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
             log INFO "📦 Extracting $input_file to $temp_dir"
             TEMP_DIRS+=("$temp_dir")
+            local extraction_exit=0
             case "$ext" in
-                zip) unzip -qq "$input_file" -d "$temp_dir" ;;
-                rar) unrar x -o+ "$input_file" "$temp_dir" >/dev/null ;;
-                7z|7zip) 7z x -y -o"$temp_dir" "$input_file" >/dev/null ;;
+                zip)
+                    unzip -qq "$input_file" -d "$temp_dir"
+                    extraction_exit=$?
+                    ;;
+                rar)
+                    unrar x -o+ "$input_file" "$temp_dir" >/dev/null
+                    extraction_exit=$?
+                    ;;
+                7z|7zip)
+                    7z x -y -o"$temp_dir" "$input_file" >/dev/null
+                    extraction_exit=$?
+                    ;;
             esac
+
+            # Strict validation: Abort if the extraction tool retrned an error code, which likely means the archive is corrupted or password-protected.
+            if [[ $extraction_exit -ne 0 ]]; then
+                log ERROR "❌ Extraction failed for $input_file (Exit code: $extraction_exit). Skipping."
+                failures=$((failures + 1))
+                return 1
+            fi
 
             log DEBUG "🧹 Flushing extraction buffers to free up RAM..."
             sync
+            sleep 1
 
             read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
             mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
