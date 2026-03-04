@@ -819,7 +819,6 @@ verify_chds() {
             # Still failed: log concise reasons and clean up
             failure_reasons="$(grep -iE 'error|fail|invalid|corrupt' "$tmpout" || true)"
             [[ -n "$failure_reasons" ]] && log DEBUG "   Failure details: $failure_reasons"
-            failures=$((failures + 1))
             log ERROR "❌ Verification failed on retry for: $chd_path — deleting"
             rm -f -- "$chd_path"
             rm -f -- "$tmpout"
@@ -1018,7 +1017,6 @@ convert_disc_file() {
                     icon="📀"
                 else
                     log WARN "⚠️ PS2 DVD detected but chdman lacks 'createdvd'. Skipping $file."
-                    failures=$((failures + 1))
                     return 1
                 fi
             else
@@ -1035,7 +1033,6 @@ convert_disc_file() {
                 icon="📀"
             else
                 log WARN "⚠️ Detected DVD image but this chdman lacks 'createdvd'. Skipping: $file"
-                failures=$((failures + 1))
                 return 1
             fi
             ;;
