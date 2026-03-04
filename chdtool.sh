@@ -1295,17 +1295,17 @@ process_input() {
         fi
     fi
 
-    # Per-iteration M3U generation for newly written CHDs
+    if [[ "$input_failed" == true ]]; then
+        failures=$((failures + 1))
+        return 1
+    fi
+
+    # Per-iteration M3U generation (only on success)
     if [[ ${#expected_chds[@]} -gt 0 ]]; then
         local chd_base
         chd_base="$(basename "${expected_chds[0]}" .chd)"
         log DEBUG "🔤 Raw base name: $chd_base"
         maybe_generate_m3u_for "$chd_base" "$outdir"
-    fi
-
-    if [[ "$input_failed" == true ]]; then
-        failures=$((failures + 1))
-        return 1
     fi
 
     return 0
