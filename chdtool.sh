@@ -536,7 +536,7 @@ parse_disc_info() {
     fi
 
     # Pattern set 4: "1 of 2" / "1/2"
-    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([0-9]+)[[:space:]]*(?:of|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$ ]]; then
+    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([0-9]+)[[:space:]]*([Oo][Ff]|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$ ]]; then
         local base="${BASH_REMATCH[1]}"
         local num="${BASH_REMATCH[2]}"
         base="$(tidy_base "$base")"
