@@ -1141,8 +1141,8 @@ process_input() {
     if is_in_list "$ext" "${archive_exts[@]}"; then
         archives_processed=$((archives_processed + 1))
         case "$ext" in
-            zip) mapfile -t archive_entries < <(unzip -Z1 "$input_file" | grep -Ei "$ext_regex") ;;
-            rar) mapfile -t archive_entries < <(unrar lb "$input_file" | grep -Ei "$ext_regex") ;;
+            zip) mapfile -t archive_entries < <(unzip -Z1 -- "$input_file" | grep -Ei "$ext_regex") ;;
+            rar) mapfile -t archive_entries < <(unrar lb -- "$input_file" | grep -Ei "$ext_regex") ;;
             7z|7zip) mapfile -t archive_entries < <(7z l -slt -- "$input_file" 2>/dev/null | awk -v IGNORECASE=1 -v re="$ext_regex" '/^Path = /{p=substr($0,8); if(p~re) print p}') ;;
         esac
         for entry in "${archive_entries[@]}"; do
