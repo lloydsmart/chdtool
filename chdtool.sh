@@ -1189,7 +1189,6 @@ process_input() {
         else
             temp_dir="$(mktemp -d -p "$TMPDIR" "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
             log INFO "📦 Extracting $input_file to $temp_dir"
-            TEMP_DIRS+=("$temp_dir")
             local extraction_exit=0
             case "$ext" in
                 zip)
