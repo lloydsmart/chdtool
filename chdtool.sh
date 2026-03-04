@@ -213,7 +213,7 @@ is_in_list() {
   return 1
 }
 
-required_commands=(chdman unzip unrar 7z stat awk)
+required_commands=(chdman unzip unrar 7z stat awk stdbuf)
 archive_exts=(zip rar 7z 7zip)
 disc_exts=(iso cue gdi ccd)
 all_exts=("${archive_exts[@]}" "${disc_exts[@]}")
@@ -713,7 +713,7 @@ cleanup_temp_dir_now() {
   # remove it from TEMP_DIRS so cleanup_all won't log it again
   local i
   for i in "${!TEMP_DIRS[@]}"; do
-    [[ "${TEMP_DIRS[$i]}" == "$d" ]] && unset 'TEMP_DIRS[i]'
+    [[ "${TEMP_DIRS[$i]}" == "$d" ]] && unset 'TEMP_DIRS[$i]'
   done
 }
 
@@ -855,7 +855,7 @@ validate_cue_file() {
 
     declare -A file_map
     while IFS= read -r -d '' f; do
-    file_map["${f,,}"]="$f"
+        file_map["${f,,}"]="$f"
     done < <(find "$cuedir" -maxdepth 1 -type f -printf '%f\0')
 
     while IFS= read -r line; do
@@ -1151,10 +1151,10 @@ process_input() {
     local temp_dir=""
 
     _remove_input_if_allowed() {
-    if [[ "$KEEP_ORIGINALS" == true ]]; then
-        log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
-        return 0
-    fi
+        if [[ "$KEEP_ORIGINALS" == true ]]; then
+            log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
+            return 0
+        fi
 
     if [[ "$DRY_RUN" == true ]]; then
         log INFO "🧪 (dry-run) Would remove original input file: $input_file"
@@ -1276,6 +1276,14 @@ process_input() {
         for disc in "${disc_files[@]}"; do
             log INFO "🧪 (dry-run) Would convert: $disc -> $outdir/$(basename "${disc%.*}").chd"
         done
+
+        # Dry-run: also show M3U intent (if this looks like a multi-disc set)
+        if [[ ${#expected_chds[@]} -gt 0 ]]; then
+            local chd_base
+            chd_base="$(basename "${expected_chds[0]}" .chd)"
+            maybe_generate_m3u_for "$chd_base" "$outdir"
+        fi
+        
         return 0
     fi
 
