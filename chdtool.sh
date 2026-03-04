@@ -58,7 +58,6 @@ fi
 TMP_ROOT="${TMPDIR:-/var/tmp/chdtool}"
 TMPDIR="$TMP_ROOT/$RUN_ID"
 mkdir -p "$TMPDIR"
-log DEBUG "📁 Using temp workspace: $TMPDIR"
 
 LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
 
@@ -202,6 +201,7 @@ log() {
   _emit_log "$lvl" "$*"
 }
 
+log DEBUG "📁 Using temp workspace: $TMPDIR"
 log INFO "🚀 Script started, input dir: $INPUT_DIR"
 [[ "$RECURSIVE" == true ]] && log INFO "📂 Recursive mode enabled — scanning subdirectories"
 [[ "$DRY_RUN" == true ]] && log INFO "🧪 Dry-run mode: no files will be written, moved, or deleted"
@@ -444,7 +444,7 @@ _chdman_progress_filter() {
         fi
 
         log "$CHDMAN_MSG_LEVEL" "$line"
-    done < <(tr $'\r' $'\n')   # CR → NL normalisation happens here
+    done < <(tr $'\r' $'\n' <&0)   # CR → NL normalisation happens here
 
     (( progress_active )) && _term_print "\r\033[2K\n"
 }
@@ -656,6 +656,7 @@ generate_m3u_for_base() {
         log INFO "🧪 (dry-run) Would (re)write M3U: $m3u_path with ${#members[@]} lines"
     else
         local tmp_m3u="$m3u_path.tmp"
+        track_temp_file "$tmp_m3u"
         : > "$tmp_m3u"
         for f in "${members[@]}"; do
             printf '%s\n' "$(basename "$f")" >> "$tmp_m3u"
@@ -699,6 +700,22 @@ maybe_generate_m3u_for() {
 # --- Global interrupt + cleanup handling --------------------------------------
 # Track temp dirs created during processing so we can clean them on SIGINT/TERM
 declare -a TEMP_DIRS=()
+declare -a TEMP_FILES=()
+
+track_temp_dir()  { TEMP_DIRS+=("$1"); }
+track_temp_file() { TEMP_FILES+=("$1"); }
+
+cleanup_temp_dir_now() {
+  local d="$1"
+  [[ -n "$d" && -d "$d" ]] || return 0
+  rm -rf -- "$d"
+  log INFO "🧹 Cleaned up temp dir: $d"
+  # remove it from TEMP_DIRS so cleanup_all won't log it again
+  local i
+  for i in "${!TEMP_DIRS[@]}"; do
+    [[ "${TEMP_DIRS[$i]}" == "$d" ]] && unset 'TEMP_DIRS[i]'
+  done
+}
 
 _restore_wrap_global() {
   # Make sure terminal autowrap is re-enabled and the progress line cleared
@@ -707,29 +724,19 @@ _restore_wrap_global() {
 }
 
 cleanup_all() {
-  # Remove any temp dirs that might still exist
-  if ((${#TEMP_DIRS[@]})); then
-    for d in "${TEMP_DIRS[@]}"; do
-      if [[ -n "$d" && -d "$d" ]]; then
+    # Temp dirs
+    for d in "${TEMP_DIRS[@]:-}"; do
+        [[ -n "$d" && -d "$d" ]] || continue
         rm -rf -- "$d"
         log INFO "🧹 Cleaned up temp dir: $d"
-      fi
     done
-  fi
 
-  # Remove our known temp files in the working directory tree
-  if [[ -n "$INPUT_DIR" && -d "$INPUT_DIR" ]]; then
-    while IFS= read -r -d '' f; do
-      rm -f -- "$f"
-      log INFO "🗑️ Removed leftover tmp file: $f"
-    done < <(find "$INPUT_DIR" -type f \( -name '*.chd.tmp' -o -name '*.m3u.tmp' \) -print0)
-  fi
-
-  # Remove verify scratch files in the new temp directory
-  while IFS= read -r -d '' f; do
-    rm -f -- "$f"
-    log INFO "🗑️ Removed verify scratch: $f"
-  done < <(find "$TMPDIR" -maxdepth 1 -type f -name 'chdverify_*' -print0 2>/dev/null || true)
+    # Temp files
+    for f in "${TEMP_FILES[@]:-}"; do
+        [[ -n "$f" && -f "$f" ]] || continue
+        rm -f -- "$f"
+        log INFO "🗑️ Removed temp file: $f"
+    done
 }
 
 _on_interrupt() {
@@ -767,6 +774,7 @@ verify_chds() {
         local verify_exit_code=0
         local tmpout
         tmpout="$(mktemp -p "$TMPDIR" chdverify_XXXXXX)"
+        track_temp_file "$tmpout"
 
         log INFO "🔎 Verifying: $chd_path"
         if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
@@ -1142,13 +1150,6 @@ process_input() {
     ext_regex="$(build_ext_regex "${disc_exts[@]}")"
     local temp_dir=""
 
-    _cleanup() {
-        if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
-            rm -rf -- "$temp_dir"
-            log INFO "🧹 Cleaned up temp dir: $temp_dir"
-        fi
-    }
-
     _remove_input_if_allowed() {
     if [[ "$KEEP_ORIGINALS" == true ]]; then
         log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
@@ -1163,9 +1164,6 @@ process_input() {
     log INFO "🗑️ Removing original input file: $input_file"
     rm -f -- "$input_file"
     }
-
-    # One-shot traps: cleanup on normal return and on error; clear both on return.
-    trap '_cleanup; trap - RETURN; trap - ERR' RETURN ERR
 
     if is_in_list "$ext" "${archive_exts[@]}"; then
         archives_processed=$((archives_processed + 1))
@@ -1222,6 +1220,7 @@ process_input() {
             # But keep expected_chds populated from archive listing (already done above).
         else
             temp_dir="$(mktemp -d -p "$TMPDIR" "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
+            track_temp_dir "$temp_dir"
             log INFO "📦 Extracting $input_file to $temp_dir"
             local extraction_exit=0
             case "$ext" in
@@ -1277,33 +1276,40 @@ process_input() {
         for disc in "${disc_files[@]}"; do
             log INFO "🧪 (dry-run) Would convert: $disc -> $outdir/$(basename "${disc%.*}").chd"
         done
+        return 0
+    fi
+
+    # Real conversion
+    if is_in_list "$ext" "${archive_exts[@]}"; then
+        # Drive conversion from archive_entries so output naming matches expected_chds
+        for entry in "${archive_entries[@]}"; do
+            local extracted="$temp_dir/$entry"
+            [[ -f "$extracted" ]] || continue
+
+            local chd_name chd_base
+            chd_name="$(archive_entry_to_chd_name "$entry")"   # e.g. "CD1 - Game.chd"
+            chd_base="${chd_name%.chd}"                        # e.g. "CD1 - Game"
+
+            if convert_disc_file "$extracted" "$outdir" "$chd_base"; then
+                tmp_chds+=("$outdir/$chd_name.tmp")
+            else
+                input_failed=true
+            fi
+        done
+
+        # We no longer need the extracted archive contents at this point
+        cleanup_temp_dir_now "$temp_dir"
+        temp_dir=""
+
     else
-        if is_in_list "$ext" "${archive_exts[@]}"; then
-            # Drive conversion from archive_entries so output naming matches expected_chds
-            for entry in "${archive_entries[@]}"; do
-                local extracted="$temp_dir/$entry"
-                [[ -f "$extracted" ]] || continue
-
-                local chd_name chd_base
-                chd_name="$(archive_entry_to_chd_name "$entry")"   # e.g. "CD1 - Game.chd"
-                chd_base="${chd_name%.chd}"                        # e.g. "CD1 - Game"
-
-                if convert_disc_file "$extracted" "$outdir" "$chd_base"; then
-                    tmp_chds+=("$outdir/$chd_name.tmp")            # matches final naming
-                else
-                    input_failed=true
-                fi
-            done
-        else
-            # Non-archive inputs keep the old behaviour
-            for disc in "${disc_files[@]}"; do
-                if convert_disc_file "$disc" "$outdir"; then
-                    tmp_chds+=("$outdir/$(basename "${disc%.*}").chd.tmp")
-                else
-                    input_failed=true
-                fi
-            done
-        fi
+        # Non-archive inputs keep the old behaviour
+        for disc in "${disc_files[@]}"; do
+            if convert_disc_file "$disc" "$outdir"; then
+                tmp_chds+=("$outdir/$(basename "${disc%.*}").chd.tmp")
+            else
+                input_failed=true
+            fi
+        done
     fi
 
     # Verify .tmp CHDs and finalize
