@@ -911,7 +911,7 @@ detect_disc_type() {
     #2. Console Fingerprinting
     # Reading the first 64KB covers Volume Descriptors and Boot Headers
     local header
-    header=$(head -c 65535 "$sniff_target" 2>/dev/null | tr -d '\0')
+    header="$(head -c 65535 -- "$sniff_target" 2>/dev/null | tr -d '\0' || true)"
 
     # Check for PS2 specifically in debug
     if [[ "$header" == *"PLAYSTATION 2"* ]]; then
