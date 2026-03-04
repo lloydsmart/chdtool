@@ -849,7 +849,7 @@ validate_cue_file() {
     while IFS= read -r line; do
         if [[ "$line" =~ ^[[:space:]]*FILE[[:space:]]+\"([^\"]+)\" ]]; then
             local ref="${BASH_REMATCH[1]}"
-            local ref_norm="${ref//\\//}"
+            local ref_norm="${ref//\\\\//}"
             local ref_basename; ref_basename="$(basename "$ref_norm")"
             local ref_lower="${ref_basename,,}"
 
