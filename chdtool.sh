@@ -497,12 +497,11 @@ parse_disc_info() {
     # Pattern set 1: Disc/CD/Disk/GD(-ROM)? with optional separator or none:
     # e.g., "Title Disc2", "Title (CD-2)", "Title [Disk02]", "Title GD-ROM 3", "Title Disc 01"
     # ERE (bash) has no (?: ). Keep groups simple and predictable.
-    local re_core='([Dd]isc|[Cc][Dd]|[Dd]isk|[Gg][Dd]|[Gg][Dd]-[Rr][Oo][Mm])'
+    local re_disc_labels='([Dd]isc|[Cc][Dd]|[Dd]isk|[Gg][Dd]|[Gg][Dd]-[Rr][Oo][Mm])'
     local re_num='([0-9]{1,3})'
     local re_sep='[[:space:]]*[-_.]?[[:space:]]*'
     # For the compact/union pattern, keep it a single capturing group:
-    local re_label_union='([Dd]isc|[Cc][Dd]|[Dd]isk|[Gg][Dd]|[Gg][Dd]-[Rr][Oo][Mm]|[Vv]ol|[Vv]olume|[Pp]art|[Pp]t\.?)'
-
+    local re_label_union="(${re_disc_labels:1:-1}|[Vv]ol|[Vv]olume|[Pp]art|[Pp]t\\.?)"
 
     if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?$re_core$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
         local base="${BASH_REMATCH[1]}"
