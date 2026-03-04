@@ -1114,10 +1114,25 @@ process_input() {
     local temp_dir=""
 
     _cleanup() {
-    if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
-        rm -rf -- "$temp_dir"
-        log INFO "🧹 Cleaned up temp dir: $temp_dir"
+        if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
+            rm -rf -- "$temp_dir"
+            log INFO "🧹 Cleaned up temp dir: $temp_dir"
+        fi
+    }
+
+    _remove_input_if_allowed() {
+    if [[ "$KEEP_ORIGINALS" == true ]]; then
+        log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
+        return 0
     fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+        log INFO "🧪 (dry-run) Would remove original input file: $input_file"
+        return 0
+    fi
+
+    log INFO "🗑️ Removing original input file: $input_file"
+    rm -f -- "$input_file"
     }
 
     # One-shot traps: cleanup on normal return and on error; clear both on return.
@@ -1157,16 +1172,7 @@ process_input() {
     # If all expected CHDs already exist and verify, remove original and done
     if [[ "$input_failed" != true ]] && verify_chds "$outdir" "${expected_chds[@]}"; then
         log INFO "✅ All expected CHDs verified for $input_file"
-        if [[ "$KEEP_ORIGINALS" != true ]]; then
-            if [[ "$DRY_RUN" == true ]]; then
-                log INFO "🧪 (dry-run) Would remove original input file: $input_file"
-            else
-                log INFO "🗑️ Removing original input file: $input_file"
-                rm -f -- "$input_file"
-            fi
-        else
-            log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
-        fi
+        _remove_input_if_allowed
         # Per-iteration M3U generation for already-present sets
         if [[ ${#expected_chds[@]} -gt 0 ]]; then
             local chd_base
@@ -1263,16 +1269,7 @@ process_input() {
                 chds_created=$((chds_created + 1))
             done
 
-            if [[ "$KEEP_ORIGINALS" != true ]]; then
-                if [[ "$DRY_RUN" == true ]]; then
-                    log INFO "🧪 (dry-run) Would remove original input file: $input_file"
-                else
-                    log INFO "🗑️ Removing original input file: $input_file"
-                    rm -f -- "$input_file"
-                fi
-            else
-                log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
-            fi
+            _remove_input_if_allowed
             
             for chd in "${expected_chds[@]}"; do
                 if [[ -f "$outdir/$chd" ]]; then
