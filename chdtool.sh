@@ -991,7 +991,6 @@ convert_disc_file() {
             log INFO "✅ Existing CHD verified, skipping conversion: $chd_path"
             return 0
         else
-            failures=$((failures + 1))
             log WARN "❌ Existing CHD verification failed, will convert and replace"
         fi
     fi
@@ -1099,6 +1098,7 @@ convert_disc_file() {
 }
 
 process_input() {
+    local input_failed=false
     local input_file="$1"
     local ext="${input_file##*.}"; ext="${ext,,}"
     local outdir
@@ -1119,6 +1119,7 @@ process_input() {
         log INFO "🧹 Cleaned up temp dir: $temp_dir"
     fi
     }
+
     # One-shot traps: cleanup on normal return and on error; clear both on return.
     trap '_cleanup; trap - RETURN; trap - ERR' RETURN ERR
 
@@ -1144,8 +1145,17 @@ process_input() {
         return 0
     fi
 
+    # If this input is a CUE, validate it even if CHDs already exist.
+    # Broken CUEs should count as an input failure (even if we can skip conversion).
+    if [[ "$ext" == "cue" ]]; then
+        if ! validate_cue_file "$input_file"; then
+            log ERROR "❌ CUE references missing files (input considered failed): $input_file"
+            input_failed=true
+        fi
+    fi
+
     # If all expected CHDs already exist and verify, remove original and done
-    if verify_chds "$outdir" "${expected_chds[@]}"; then
+    if [[ "$input_failed" != true ]] && verify_chds "$outdir" "${expected_chds[@]}"; then
         log INFO "✅ All expected CHDs verified for $input_file"
         if [[ "$KEEP_ORIGINALS" != true ]]; then
             if [[ "$DRY_RUN" == true ]]; then
@@ -1198,7 +1208,7 @@ process_input() {
             # Strict validation: Abort if the extraction tool retrned an error code, which likely means the archive is corrupted or password-protected.
             if [[ $extraction_exit -ne 0 ]]; then
                 log ERROR "❌ Extraction failed for $input_file (Exit code: $extraction_exit). Skipping."
-                failures=$((failures + 1))
+                input_failed=true
                 return 1
             fi
 
@@ -1238,7 +1248,7 @@ process_input() {
             if convert_disc_file "$disc" "$outdir"; then
                 tmp_chds+=("$outdir/$(basename "${disc%.*}").chd.tmp")
             else
-                failures=$((failures + 1))
+                input_failed=true
             fi
         done
     fi
@@ -1283,7 +1293,7 @@ process_input() {
                     log INFO "🗑️ Removed failed tmp CHD: $tmp_chd"
                 fi
             done
-            failures=$((failures + 1))
+            input_failed=true
             log WARN "⚠️ CHD verification failed after conversion for $input_file, keeping original"
         fi
     fi
@@ -1294,6 +1304,11 @@ process_input() {
         chd_base="$(basename "${expected_chds[0]}" .chd)"
         log DEBUG "🔤 Raw base name: $chd_base"
         maybe_generate_m3u_for "$chd_base" "$outdir"
+    fi
+
+    if [[ "$input_failed" == true ]]; then
+        failures=$((failures + 1))
+        return 1
     fi
 
     return 0
@@ -1320,9 +1335,7 @@ log INFO "🔎 Found ${#all_inputs[@]} inputs"
 
 for input in "${all_inputs[@]}"; do
     log INFO "▶️ Processing file: $input"
-    if ! process_input "$input"; then
-        log ERROR "⚠️ Failed to process $input"
-    fi
+    process_input "$input" || log ERROR "⚠️ Failed to process $input"
 done
 
 log INFO "📊 Summary:"
