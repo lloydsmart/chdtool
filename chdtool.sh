@@ -894,25 +894,43 @@ detect_disc_type() {
     # -----------------
 
     # Sniff the header before checking extensions
-    # --- UPDATED SNIFF LOGIC WITH DEBUGGING ---
     local sniff_target="$img"
     if [[ "$ext" == "cue" ]]; then
-        local raw_bin_name
-        raw_bin_name="$(awk -F'"' 'tolower($1) ~ /^[[:space:]]*file[[:space:]]+/ {print $2; exit}' "$img")"
+        local cue_dir
+        cue_dir="$(dirname "$img")"
 
-        local bin_path
-        bin_path="$(dirname "$img")/${raw_bin_name//\\//}"
-        
-        [[ -z "$raw_bin_name" ]] && log DEBUG "DEBUG: No FILE entry found in CUE: $img"
-        log DEBUG "DEBUG: CUE refers to file: [$raw_bin_name]"
-        log DEBUG "DEBUG: Full resolved bin_path: [$bin_path]"
+        # Prefer a likely DATA file (BIN/ISO/IMG/MDF) over audio tracks.
+        local raw_ref=""
+        raw_ref="$(
+            awk -F'"' '
+                BEGIN { IGNORECASE=1 }
+                /^[[:space:]]*FILE[[:space:]]+"/ {
+                    ref=$2
+                    low=tolower(ref)
+                    gsub(/\\/, "/", low)
+                    # pick first "data-ish" file
+                    if (low ~ /\.(bin|iso|img|mdf)$/) { print ref; exit }
+                    # otherwise remember first FILE as fallback
+                    if (first == "") first = ref
+                }
+                END { if (first != "") print first }
+            ' "$img"
+        )"
 
-        if [[ -f "$bin_path" ]]; then
-            log DEBUG "DEBUG: Successfully found BIN file. Switching sniff_target."
-            sniff_target="$bin_path"
+        # Normalize Windows path separators
+        raw_ref="${raw_ref//\\//}"
+
+        local sniff_candidate="$cue_dir/$raw_ref"
+
+        log DEBUG "DEBUG: CUE selected sniff candidate: [$raw_ref]"
+        log DEBUG "DEBUG: Full resolved sniff path:     [$sniff_candidate]"
+
+        if [[ -n "$raw_ref" && -f "$sniff_candidate" ]]; then
+            log DEBUG "DEBUG: Found referenced file. Switching sniff_target."
+            sniff_target="$sniff_candidate"
         else
-            log DEBUG "DEBUG: FAILED to find BIN file at that path."
-            log DEBUG "DEBUG: Directory contents of $(dirname "$img"): $(ls -m "$(dirname "$img")")"
+            log DEBUG "DEBUG: FAILED to resolve referenced file from CUE."
+            log DEBUG "DEBUG: Directory contents of $cue_dir: $(ls -m "$cue_dir")"
         fi
     fi
 
