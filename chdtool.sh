@@ -1140,7 +1140,6 @@ process_input() {
     local ext="${input_file##*.}"; ext="${ext,,}"
     local outdir
     outdir="$(dirname "$input_file")"
-
     local archive_entries=()
     local disc_files=()
     local expected_chds=()
@@ -1150,19 +1149,24 @@ process_input() {
     ext_regex="$(build_ext_regex "${disc_exts[@]}")"
     local temp_dir=""
 
+    _return_failed_input() {
+        failures=$((failures + 1))
+        return 1
+    }
+
     _remove_input_if_allowed() {
         if [[ "$KEEP_ORIGINALS" == true ]]; then
             log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
             return 0
         fi
 
-    if [[ "$DRY_RUN" == true ]]; then
-        log INFO "🧪 (dry-run) Would remove original input file: $input_file"
-        return 0
-    fi
+        if [[ "$DRY_RUN" == true ]]; then
+            log INFO "🧪 (dry-run) Would remove original input file: $input_file"
+            return 0
+        fi
 
-    log INFO "🗑️ Removing original input file: $input_file"
-    rm -f -- "$input_file"
+        log INFO "🗑️ Removing original input file: $input_file"
+        rm -f -- "$input_file"
     }
 
     if is_in_list "$ext" "${archive_exts[@]}"; then
@@ -1242,6 +1246,8 @@ process_input() {
             if [[ $extraction_exit -ne 0 ]]; then
                 log ERROR "❌ Extraction failed for $input_file (Exit code: $extraction_exit). Skipping."
                 input_failed=true
+                cleanup_temp_dir_now "$temp_dir"
+                _return_failed_input
                 return 1
             fi
 
@@ -1357,7 +1363,7 @@ process_input() {
     fi
 
     if [[ "$input_failed" == true ]]; then
-        failures=$((failures + 1))
+        _return_failed_input
         return 1
     fi
 
