@@ -1140,7 +1140,6 @@ process_input() {
     local ext="${input_file##*.}"; ext="${ext,,}"
     local outdir
     outdir="$(dirname "$input_file")"
-
     local archive_entries=()
     local disc_files=()
     local expected_chds=()
@@ -1150,19 +1149,24 @@ process_input() {
     ext_regex="$(build_ext_regex "${disc_exts[@]}")"
     local temp_dir=""
 
+    _fail_input() {
+        failures=$((failures + 1))
+        return 1
+    }
+
     _remove_input_if_allowed() {
         if [[ "$KEEP_ORIGINALS" == true ]]; then
             log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
             return 0
         fi
 
-    if [[ "$DRY_RUN" == true ]]; then
-        log INFO "🧪 (dry-run) Would remove original input file: $input_file"
-        return 0
-    fi
+        if [[ "$DRY_RUN" == true ]]; then
+            log INFO "🧪 (dry-run) Would remove original input file: $input_file"
+            return 0
+        fi
 
-    log INFO "🗑️ Removing original input file: $input_file"
-    rm -f -- "$input_file"
+        log INFO "🗑️ Removing original input file: $input_file"
+        rm -f -- "$input_file"
     }
 
     if is_in_list "$ext" "${archive_exts[@]}"; then
@@ -1242,7 +1246,7 @@ process_input() {
             if [[ $extraction_exit -ne 0 ]]; then
                 log ERROR "❌ Extraction failed for $input_file (Exit code: $extraction_exit). Skipping."
                 input_failed=true
-                return 1
+                _fail_input
             fi
 
             log DEBUG "🧹 Flushing extraction buffers to free up RAM..."
@@ -1356,10 +1360,7 @@ process_input() {
         fi
     fi
 
-    if [[ "$input_failed" == true ]]; then
-        failures=$((failures + 1))
-        return 1
-    fi
+    ${input_failed:-false} && _fail_input
 
     # Per-iteration M3U generation (only on success)
     if [[ ${#expected_chds[@]} -gt 0 ]]; then
