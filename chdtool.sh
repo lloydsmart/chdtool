@@ -1149,7 +1149,7 @@ process_input() {
     ext_regex="$(build_ext_regex "${disc_exts[@]}")"
     local temp_dir=""
 
-    _fail_input() {
+    _return_failed_input() {
         failures=$((failures + 1))
         return 1
     }
@@ -1246,7 +1246,9 @@ process_input() {
             if [[ $extraction_exit -ne 0 ]]; then
                 log ERROR "❌ Extraction failed for $input_file (Exit code: $extraction_exit). Skipping."
                 input_failed=true
-                _fail_input
+                cleanup_temp_dir_now "$temp_dir"
+                _return_failed_input
+                return 1
             fi
 
             log DEBUG "🧹 Flushing extraction buffers to free up RAM..."
@@ -1360,7 +1362,10 @@ process_input() {
         fi
     fi
 
-    ${input_failed:-false} && _fail_input
+    if [[ "$input_failed" == true ]]; then
+        _return_failed_input
+        return 1
+    fi
 
     # Per-iteration M3U generation (only on success)
     if [[ ${#expected_chds[@]} -gt 0 ]]; then
