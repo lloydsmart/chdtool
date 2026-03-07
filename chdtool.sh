@@ -341,19 +341,19 @@ archive_entry_to_chd_name() {
   printf '%s.chd' "$stem"
 }
 
-select_preferred_disc_entries() {
-    local entries=("$@")
+select_preferred_disc_candidates() {
+    local candidates=("$@")
     local -a cues=() gdis=() ccds=() isos=()
-    local entry ext
+    local candidate ext
 
-    for entry in "${entries[@]}"; do
-        ext="${entry##*.}"
+    for candidate in "${candidates[@]}"; do
+        ext="${candidate##*.}"
         ext="${ext,,}"
         case "$ext" in
-            cue) cues+=("$entry") ;;
-            gdi) gdis+=("$entry") ;;
-            ccd) ccds+=("$entry") ;;
-            iso) isos+=("$entry") ;;
+            cue) cues+=("$candidate") ;;
+            gdi) gdis+=("$candidate") ;;
+            ccd) ccds+=("$candidate") ;;
+            iso) isos+=("$candidate") ;;
         esac
     done
 
@@ -1205,7 +1205,7 @@ process_input() {
         esac
 
         if [[ ${#archive_entries[@]} -gt 0 ]]; then
-            mapfile -t archive_entries < <(select_preferred_disc_entries "${archive_entries[@]}")
+            mapfile -t archive_entries < <(select_preferred_disc_candidates "${archive_entries[@]}")
             log DEBUG "📀 Selected ${#archive_entries[@]} preferred disc descriptor(s) from archive: $(basename "$input_file")"
             for entry in "${archive_entries[@]}"; do
                 log DEBUG "   Selected archive entry: $entry"
@@ -1291,11 +1291,18 @@ process_input() {
             read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
             mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
 
-            if [[ ${#disc_files[@]} -eq 0 && ${#archive_entries[@]} -gt 0 ]]; then
+            if [[ ${#disc_files[@]} -gt 0 ]]; then
+                mapfile -t disc_files < <(select_preferred_disc_candidates "${disc_files[@]}")
+                log DEBUG "📀 Selected ${#disc_files[@]} preferred extracted disc file(s) from: $temp_dir"
+                for disc in "${disc_files[@]}"; do
+                    log DEBUG "   Selected extracted file: $disc"
+                done
+            elif [[ ${#archive_entries[@]} -gt 0 ]]; then
                 for entry in "${archive_entries[@]}"; do
                     local full_path="$temp_dir/$entry"
                     [[ -f "$full_path" ]] && disc_files+=("$full_path")
                 done
+                log DEBUG "📀 Falling back to archive-selected extracted entries: ${#disc_files[@]}"
             fi
         fi
 
