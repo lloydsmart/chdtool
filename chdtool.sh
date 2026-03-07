@@ -1261,7 +1261,7 @@ process_input() {
     # Broken CUEs should count as an input failure (even if we can skip conversion).
     if [[ "$ext" == "cue" ]]; then
         if ! validate_cue_file "$input_file"; then
-            log ERROR "❌ CUE references missing files (input considered failed): $input_file"
+            log ERROR "❌ CUE validation failed (input considered failed): $input_file"
             input_failed=true
         fi
     fi
