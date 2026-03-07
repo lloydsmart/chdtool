@@ -894,8 +894,10 @@ validate_cue_file() {
 
             [[ "$ref_lower" == "${cue_basename,,}" ]] && continue
 
-            if [[ "$ref_lower" == *.mp3 || "$ref_lower" == *.wav ]]; then
-                log WARN "⚠️ CUE file references unsupported audio format: $ref_basename"
+            if [[ "$ref_lower" == *.wav ]]; then
+                log DEBUG "🎵 CUE file references WAV audio track: $ref_basename"
+            elif [[ "$ref_lower" == *.mp3 || "$ref_lower" == *.ogg || "$ref_lower" == *.opus || "$ref_lower" == *.m4a ]]; then
+                log WARN "⚠️ CUE file references lossy/unsupported audio format: $ref_basename"
             fi
             if [[ "$ref_norm" == /* || "$ref_norm" == *".."* ]]; then
                 log WARN "⚠️ Skipping unsafe external path in CUE: $ref_basename"
