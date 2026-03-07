@@ -934,7 +934,11 @@ validate_cue_file() {
         fi
     done < "$cue_file"
 
-    (( missing == 0 && unsupported_audio == 0 ))
+    if (( missing == 0 && unsupported_audio == 0 )); then
+        log DEBUG "✅ CUE validation passed: $cue_file"
+        return 0
+    fi
+    return 1
 }
 
 detect_disc_type() {
@@ -1234,8 +1238,11 @@ process_input() {
             mapfile -t archive_entries < <(select_preferred_disc_candidates "${archive_entries[@]}")
             log DEBUG "📀 Selected ${#archive_entries[@]} preferred disc descriptor(s) from archive: $(basename "$input_file")"
             for entry in "${archive_entries[@]}"; do
+                local expected_chd
+                expected_chd="$(archive_entry_to_chd_name "$entry")"
                 log DEBUG "   Selected archive entry: $entry"
-                expected_chds+=("$(archive_entry_to_chd_name "$entry")")
+                log DEBUG "   Expected CHD: $expected_chd"
+                expected_chds+=("$expected_chd")
             done
         fi
     fi
