@@ -879,6 +879,7 @@ validate_cue_file() {
     local cue_basename
     cue_basename="$(basename "$cue_file")"
     local missing=0
+    local unsupported_audio=0
 
     declare -A file_map
     while IFS= read -r -d '' f; do
@@ -894,23 +895,34 @@ validate_cue_file() {
 
             [[ "$ref_lower" == "${cue_basename,,}" ]] && continue
 
-            if [[ "$ref_lower" == *.wav ]]; then
-                log DEBUG "🎵 CUE file references WAV audio track: $ref_basename"
-            elif [[ "$ref_lower" == *.mp3 || "$ref_lower" == *.ogg || "$ref_lower" == *.opus || "$ref_lower" == *.m4a ]]; then
-                log WARN "⚠️ CUE file references lossy/unsupported audio format: $ref_basename"
-            fi
             if [[ "$ref_norm" == /* || "$ref_norm" == *".."* ]]; then
                 log WARN "⚠️ Skipping unsafe external path in CUE: $ref_basename"
                 continue
             fi
+
             if [[ -z "${file_map["$ref_lower"]:-}" ]]; then
                 log ERROR "❌ Missing referenced file in CUE: $ref_basename (required by $cue_file)"
                 missing=1
+                continue
             fi
+
+            case "$ref_lower" in
+                *.wav)
+                    log DEBUG "🎵 CUE file references WAV audio track: $ref_basename"
+                    ;;
+                *.mp3|*.ogg|*.opus|*.m4a)
+                    log ERROR "❌ CUE file references lossy/unsupported audio format: $ref_basename"
+                    unsupported_audio=1
+                    ;;
+                *.flac)
+                    log ERROR "❌ CUE file references FLAC audio track: $ref_basename (lossless, but chdman input support is not yet confirmed)"
+                    unsupported_audio=1
+                    ;;
+            esac
         fi
     done < "$cue_file"
 
-    return $missing
+    (( missing == 0 && unsupported_audio == 0 ))
 }
 
 detect_disc_type() {
