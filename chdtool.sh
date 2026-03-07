@@ -6,10 +6,11 @@ script_start_time=$(date +%s)
 shopt -s nullglob
 shopt -s extglob
 
-USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] [--dry-run|-n] [--file-tee|-F|--no-file-tee|-N] <input directory>"
+USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] [--dry-run|-n] [--allow-unverified-cue-audio|-a] [--file-tee|-F|--no-file-tee|-N] <input directory>"
 KEEP_ORIGINALS=false
 RECURSIVE=false
 DRY_RUN=false
+ALLOW_UNVERIFIED_CUE_AUDIO=false
 INPUT_DIR=""
 IS_RAM_DISK=false
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
@@ -18,7 +19,7 @@ case "${CHDMAN_MSG_LEVEL^^}" in
   DEBUG|INFO|WARN|ERROR) ;;     # OK
   *) CHDMAN_MSG_LEVEL="INFO" ;; # fallback
 esac
-    
+
 # Manual parsing to support long options
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -28,6 +29,8 @@ while [[ $# -gt 0 ]]; do
             RECURSIVE=true; shift ;;
         --dry-run|-n)
             DRY_RUN=true; shift ;;
+        --allow-unverified-cue-audio|-a)
+            ALLOW_UNVERIFIED_CUE_AUDIO=true; shift ;;
         --file-tee|-F)
             LOG_TEE_FILE=1; shift ;;
         --no-file-tee|-N)
@@ -205,6 +208,7 @@ log DEBUG "📁 Using temp workspace: $TMPDIR"
 log INFO "🚀 Script started, input dir: $INPUT_DIR"
 [[ "$RECURSIVE" == true ]] && log INFO "📂 Recursive mode enabled — scanning subdirectories"
 [[ "$DRY_RUN" == true ]] && log INFO "🧪 Dry-run mode: no files will be written, moved, or deleted"
+[[ "$ALLOW_UNVERIFIED_CUE_AUDIO" == true ]] && log WARN "⚠️ Allowing unverified/lossy CUE audio tracks — conversion may succeed from non-preservation-grade sources"
 
 is_in_list() {
   local needle="$1"; shift
@@ -339,6 +343,33 @@ archive_entry_to_chd_name() {
   stem="${stem//\// - }"
   stem="$(sanitize_filename "$stem")"
   printf '%s.chd' "$stem"
+}
+
+select_preferred_disc_candidates() {
+    local candidates=("$@")
+    local -a cues=() gdis=() ccds=() isos=()
+    local candidate ext
+
+    for candidate in "${candidates[@]}"; do
+        ext="${candidate##*.}"
+        ext="${ext,,}"
+        case "$ext" in
+            cue) cues+=("$candidate") ;;
+            gdi) gdis+=("$candidate") ;;
+            ccd) ccds+=("$candidate") ;;
+            iso) isos+=("$candidate") ;;
+        esac
+    done
+
+    if (( ${#cues[@]} > 0 )); then
+        printf '%s\n' "${cues[@]}"
+    elif (( ${#gdis[@]} > 0 )); then
+        printf '%s\n' "${gdis[@]}"
+    elif (( ${#ccds[@]} > 0 )); then
+        printf '%s\n' "${ccds[@]}"
+    else
+        printf '%s\n' "${isos[@]}"
+    fi
 }
 
 check_temp_storage "$TMPDIR"
@@ -852,6 +883,7 @@ validate_cue_file() {
     local cue_basename
     cue_basename="$(basename "$cue_file")"
     local missing=0
+    local unsupported_audio=0
 
     declare -A file_map
     while IFS= read -r -d '' f; do
@@ -867,21 +899,46 @@ validate_cue_file() {
 
             [[ "$ref_lower" == "${cue_basename,,}" ]] && continue
 
-            if [[ "$ref_lower" == *.mp3 || "$ref_lower" == *.wav ]]; then
-                log WARN "⚠️ CUE file references unsupported audio format: $ref_basename"
-            fi
             if [[ "$ref_norm" == /* || "$ref_norm" == *".."* ]]; then
                 log WARN "⚠️ Skipping unsafe external path in CUE: $ref_basename"
                 continue
             fi
+
             if [[ -z "${file_map["$ref_lower"]:-}" ]]; then
                 log ERROR "❌ Missing referenced file in CUE: $ref_basename (required by $cue_file)"
                 missing=1
+                continue
             fi
+
+            case "$ref_lower" in
+                *.wav)
+                    log DEBUG "🎵 CUE file references WAV audio track: $ref_basename"
+                    ;;
+                *.mp3|*.ogg|*.opus|*.m4a)
+                    if [[ "$ALLOW_UNVERIFIED_CUE_AUDIO" == true ]]; then
+                        log WARN "⚠️ CUE file references lossy/unsupported audio format, but override is enabled: $ref_basename"
+                    else
+                        log ERROR "❌ CUE file references lossy/unsupported audio format: $ref_basename"
+                        unsupported_audio=1
+                    fi
+                    ;;
+                *.flac)
+                    if [[ "$ALLOW_UNVERIFIED_CUE_AUDIO" == true ]]; then
+                        log WARN "⚠️ CUE file references FLAC audio track, but override is enabled: $ref_basename"
+                    else
+                        log ERROR "❌ CUE file references FLAC audio track: $ref_basename (lossless, but chdman input support is not yet confirmed)"
+                        unsupported_audio=1
+                    fi
+                    ;;
+            esac
         fi
     done < "$cue_file"
 
-    return $missing
+    if (( missing == 0 && unsupported_audio == 0 )); then
+        log DEBUG "✅ CUE validation passed: $cue_file"
+        return 0
+    fi
+    return 1
 }
 
 detect_disc_type() {
@@ -1006,7 +1063,7 @@ convert_disc_file() {
     # If it's a CUE, validate referenced files first
     if [[ "${file,,}" == *.cue ]]; then
         if ! validate_cue_file "$file"; then
-            log ERROR "❌ Missing referenced file in CUE: $file"
+            log ERROR "❌ CUE validation failed: $file"
             return 1
         fi
     fi
@@ -1176,9 +1233,18 @@ process_input() {
             rar) mapfile -t archive_entries < <(unrar lb -- "$input_file" | grep -Ei "$ext_regex") ;;
             7z|7zip) mapfile -t archive_entries < <(7z l -slt -- "$input_file" 2>/dev/null | awk -v IGNORECASE=1 -v re="$ext_regex" '/^Path = /{p=substr($0,8); if(p~re) print p}') ;;
         esac
-        for entry in "${archive_entries[@]}"; do
-            expected_chds+=("$(archive_entry_to_chd_name "$entry")")
-        done
+
+        if [[ ${#archive_entries[@]} -gt 0 ]]; then
+            mapfile -t archive_entries < <(select_preferred_disc_candidates "${archive_entries[@]}")
+            log DEBUG "📀 Selected ${#archive_entries[@]} preferred disc descriptor(s) from archive: $(basename "$input_file")"
+            for entry in "${archive_entries[@]}"; do
+                local expected_chd
+                expected_chd="$(archive_entry_to_chd_name "$entry")"
+                log DEBUG "   Selected archive entry: $entry"
+                log DEBUG "   Expected CHD: $expected_chd"
+                expected_chds+=("$expected_chd")
+            done
+        fi
     fi
 
     if is_in_list "$ext" "${disc_exts[@]}"; then
@@ -1195,7 +1261,7 @@ process_input() {
     # Broken CUEs should count as an input failure (even if we can skip conversion).
     if [[ "$ext" == "cue" ]]; then
         if ! validate_cue_file "$input_file"; then
-            log ERROR "❌ CUE references missing files (input considered failed): $input_file"
+            log ERROR "❌ CUE validation failed (input considered failed): $input_file"
             input_failed=true
         fi
     fi
@@ -1258,11 +1324,18 @@ process_input() {
             read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
             mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
 
-            if [[ ${#disc_files[@]} -eq 0 && ${#archive_entries[@]} -gt 0 ]]; then
+            if [[ ${#disc_files[@]} -gt 0 ]]; then
+                mapfile -t disc_files < <(select_preferred_disc_candidates "${disc_files[@]}")
+                log DEBUG "📀 Selected ${#disc_files[@]} preferred extracted disc file(s) from: $temp_dir"
+                for disc in "${disc_files[@]}"; do
+                    log DEBUG "   Selected extracted file: $disc"
+                done
+            elif [[ ${#archive_entries[@]} -gt 0 ]]; then
                 for entry in "${archive_entries[@]}"; do
                     local full_path="$temp_dir/$entry"
                     [[ -f "$full_path" ]] && disc_files+=("$full_path")
                 done
+                log DEBUG "📀 Falling back to archive-selected extracted entries: ${#disc_files[@]}"
             fi
         fi
 
