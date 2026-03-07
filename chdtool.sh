@@ -341,6 +341,33 @@ archive_entry_to_chd_name() {
   printf '%s.chd' "$stem"
 }
 
+select_preferred_disc_entries() {
+    local entries=("$@")
+    local -a cues=() gdis=() ccds=() isos=()
+    local entry ext
+
+    for entry in "${entries[@]}"; do
+        ext="${entry##*.}"
+        ext="${ext,,}"
+        case "$ext" in
+            cue) cues+=("$entry") ;;
+            gdi) gdis+=("$entry") ;;
+            ccd) ccds+=("$entry") ;;
+            iso) isos+=("$entry") ;;
+        esac
+    done
+
+    if (( ${#cues[@]} > 0 )); then
+        printf '%s\n' "${cues[@]}"
+    elif (( ${#gdis[@]} > 0 )); then
+        printf '%s\n' "${gdis[@]}"
+    elif (( ${#ccds[@]} > 0 )); then
+        printf '%s\n' "${ccds[@]}"
+    else
+        printf '%s\n' "${isos[@]}"
+    fi
+}
+
 check_temp_storage "$TMPDIR"
 
 # ---------- chdman progress handling ----------
@@ -1176,9 +1203,15 @@ process_input() {
             rar) mapfile -t archive_entries < <(unrar lb -- "$input_file" | grep -Ei "$ext_regex") ;;
             7z|7zip) mapfile -t archive_entries < <(7z l -slt -- "$input_file" 2>/dev/null | awk -v IGNORECASE=1 -v re="$ext_regex" '/^Path = /{p=substr($0,8); if(p~re) print p}') ;;
         esac
-        for entry in "${archive_entries[@]}"; do
-            expected_chds+=("$(archive_entry_to_chd_name "$entry")")
-        done
+
+        if [[ ${#archive_entries[@]} -gt 0 ]]; then
+            mapfile -t archive_entries < <(select_preferred_disc_entries "${archive_entries[@]}")
+            log DEBUG "📀 Selected ${#archive_entries[@]} preferred disc descriptor(s) from archive: $(basename "$input_file")"
+            for entry in "${archive_entries[@]}"; do
+                log DEBUG "   Selected archive entry: $entry"
+                expected_chds+=("$(archive_entry_to_chd_name "$entry")")
+            done
+        fi
     fi
 
     if is_in_list "$ext" "${disc_exts[@]}"; then
