@@ -1,102 +1,216 @@
-# 🎮 chdtool  
+# chdtool
 
-[![License](https://img.shields.io/github/license/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/blob/master/LICENSE)  [![Latest Release](https://img.shields.io/github/v/release/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/releases)  [![ShellCheck](https://github.com/lloydsmart/chdtool/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/lloydsmart/chdtool/actions/workflows/shellcheck.yml)
+[![License](https://img.shields.io/github/license/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/blob/main/LICENSE)
+[![Release](https://img.shields.io/github/v/release/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/releases)
+[![ShellCheck](https://img.shields.io/github/actions/workflow/status/lloydsmart/chdtool/shellcheck.yml?branch=main&label=shellcheck)](https://github.com/lloydsmart/chdtool/actions/workflows/shellcheck.yml)
 
-A Bash script that converts CD/DVD disc images (ZIP/RAR/7Z/ISO/CUE/GDI/CCD) into CHD using chdman.
+A robust Bash script for converting CD/DVD disc images and archives into **CHD (Compressed Hunks of Data)** format using `chdman`.
 
-Convert, verify, and manage disc-based game images into CHD format with ease.
-Supports recursive scanning, CD/DVD detection, archive extraction, and more.
+Designed for batch processing, validation, logging, and multi-disc handling — ideal for emulation libraries.
 
 ---
 
-## ✨ Features  
+Convert everything in a directory:
 
-- 📦 Extracts archives (`.zip`, `.rar`, `.7z`)
-- 💿 Converts **CD images** via `chdman createcd`
-- 📀 Converts **DVD images** via `chdman createdvd` (if available)
-- 🔍 Verifies existing CHDs before conversion
-- 🗑️ Cleans up temp files automatically
-- 📊 Logs space savings per file and in total
-- 🔄 Recursive directory scanning
-- ⚙️ Option to keep originals with `--keep-originals`
+```bash
+./chdtool.sh -r /path/to/roms
+```
+
+---
+
+## ✨ Features
+
+- 📦 Supports common input formats:
+  - Archives: `zip`, `rar`, `7z`
+  - Disc images: `iso`, `cue`, `gdi`, `ccd`
+- 🔄 Automatic extraction of archives before conversion
+- 💿 Intelligent CD vs DVD detection (`createcd` vs `createdvd`)
+- ✅ Verification of CHDs using `chdman verify`
+  - Automatic retry on failure
+  - Deletes invalid CHDs
+- 📉 Space savings reporting
+- 🧾 Automatic M3U generation for multi-disc sets
+- 🧹 Safe temp directory handling with cleanup traps
+- 🧪 Dry-run mode (no changes made)
+- 🪵 Structured logging system:
+  - Console / file / syslog / journald
+  - Configurable verbosity
+- ⚡ Progress bar (TTY-aware, non-spammy)
 
 ---
 
 ## 🚀 Usage
-```bash
-./chdtool.sh [--keep-originals|-k] [--recursive|-r] <input directory>
-```
 
-Examples:
 ```bash
-./chdtool.sh /path/to/dir
-./chdtool.sh -k -r /roms
+./chdtool.sh [options] <input directory>
 ```
 
 ### Options
 
-- `--keep-originals` → Keep input archives/discs after conversion
-- `--help` → Show usage
+| Option | Description |
+|------|-------------|
+| `-k`, `--keep-originals` | Do not delete source files after conversion |
+| `-r`, `--recursive` | Process subdirectories |
+| `-n`, `--dry-run` | Show what would happen without making changes |
+| `-F`, `--file-tee` | Force logging to file |
+| `-N`, `--no-file-tee` | Disable logging to file |
 
 ---
 
-## 📋 Example Run
+## 📁 Example
 
-```text
-[2025-07-05 14:00:12] 🚀 Script started, input dir: /mnt/retronas/roms/sega/saturn/
-[2025-07-05 14:00:12] ℹ️ Using chdman - MAME Compressed Hunks of Data (CHD) manager 0.251 (unknown)
-[2025-07-05 14:00:12] 🔎 Found 6 inputs
-[2025-07-05 14:00:12] ▶️ Processing file: /mnt/retronas/roms/sega/saturn/Virtua Fighter (Europe).zip
-[2025-07-05 14:00:12] 📦 Extracting Virtua Fighter (Europe).zip to /tmp/chdconv_Virtua Fighter (Europe)_a1B2
-[2025-07-05 14:00:14] 💿 Converting: Virtua Fighter (Europe).cue → Virtua Fighter (Europe).chd.tmp
-Compression complete ... final ratio = 58.7%
-[2025-07-05 14:01:02] 🔎 Verifying: Virtua Fighter (Europe).chd.tmp
-[2025-07-05 14:01:20] ✅ Verified CHD: Virtua Fighter (Europe).chd.tmp
-[2025-07-05 14:01:20] 🔄 Replaced old CHD with new verified CHD: Virtua Fighter (Europe).chd
-[2025-07-05 14:01:20] 🗑️ Removing original input file: Virtua Fighter (Europe).zip
-[2025-07-05 14:01:20] 📉 Space saving for Virtua Fighter (Europe).zip: 640 MB → 375 MB, saved 265 MB (41%)
-[2025-07-05 14:01:20] 🔤 Raw base name: Virtua Fighter (Europe)
-[2025-07-05 14:01:20] 🔤 Normalized base name for M3U: virtua fighter
-[2025-07-05 14:01:20] 🔍 Found 1 CHD candidate, remaining inputs: yes
-[2025-07-05 14:01:20] 🧹 Cleaned up temp dir on exit: /tmp/chdconv_Virtua Fighter (Europe)_a1B2
-[2025-07-05 14:01:20] 🎉 All inputs processed successfully!
-[2025-07-05 14:01:20] 📊 Summary:
-[2025-07-05 14:01:20] 📦 Total original size: 5 GB
-[2025-07-05 14:01:20] 💿 Total CHD size: 4 GB
-[2025-07-05 14:01:20] 📉 Total space saved: 1 GB (23%)
-[2025-07-05 14:01:20] 📦 Archives processed: 6
-[2025-07-05 14:01:20] 💿 CHDs created:       6
-[2025-07-05 14:01:20] ❌ Failures:           0
-[2025-07-05 14:01:20] ⏱️ Elapsed time: 55m 56s
-[2025-07-05 14:01:20] ✅ Done!
+```bash
+./chdtool.sh -r /mnt/roms
+```
 
+Dry run:
+
+```bash
+./chdtool.sh -n /mnt/roms
 ```
 
 ---
 
-## Notes
-- Temporary CHDs are created as `*.chd.tmp` then verified and renamed.
-- Logs are written under `logs/`.
-- DVD detection: prefers UDF via `file`, otherwise size heuristic (≥1 GB → DVD).
+## 📦 Supported Input Formats
 
-## 🌟 Roadmap
+### Disc images
+- `.iso`
+- `.cue` (with referenced BIN/WAV/MP3 validation)
+- `.gdi`
+- `.ccd`
 
-- [ ] M3U playlist generation for multi-disc sets  
-- [ ] Detect multi-part RAR/7z archives  
-- [ ] Add parallel conversion mode  
+### Archives
+- `.zip`
+- `.rar`
+- `.7z`
 
----
-
-## 🛠 Requirements
-
-- `bash` ≥ 5.0  
-- `chdman` (from [MAME](https://www.mamedev.org/))
-- `p7zip`, `unrar`, `unzip` for archives
-- `file` utility (for CD/DVD detection)
-- stat, file, find, grep, sort, tee
+Archives are extracted to a temporary directory and processed automatically.
 
 ---
 
-## 📜 License
+## 💿 Output
 
-[MIT License](LICENSE) © 2025 Lloyd Smart
+- CHDs are created alongside the input files
+- Temporary files use `.tmp` suffix until verified
+- Originals are removed unless `--keep-originals` is set
+
+---
+
+## 🧾 Multi-disc Support
+
+- Automatically detects disc numbering patterns:
+  - `Disc 1`, `CD2`, `Part 3`, `Side A`, `1 of 2`, etc.
+- Generates `.m3u` playlists when **2+ discs** are detected
+- Filenames are sanitized for cross-platform compatibility
+
+Example:
+
+```
+Final Fantasy VII (Disc 1).chd
+Final Fantasy VII (Disc 2).chd
+Final Fantasy VII.m3u
+```
+
+---
+
+## 🔍 Verification
+
+- All CHDs are verified with `chdman verify`
+- Failed verification:
+  - Retried once
+  - Deleted if still invalid
+- Existing CHDs are verified before skipping conversion
+
+---
+
+## 🪵 Logging
+
+Configurable via environment variables:
+
+```bash
+LOG_DEST=auto|console|file|syslog|journald
+LOG_LEVEL_THRESHOLD=DEBUG|INFO|WARN|ERROR
+LOG_TEE_CONSOLE=auto|1|0
+LOG_TEE_FILE=1|0
+LOG_TAG=chdtool
+```
+
+Default log file:
+
+```
+logs/chd_conversion_<timestamp>.log
+```
+
+---
+
+## 📊 Output Summary
+
+At the end of a run:
+
+- Total original size
+- Total CHD size
+- Space saved
+- Archives processed
+- CHDs created
+- Failures
+- Elapsed time
+
+---
+
+## ⚙️ Requirements
+
+The following tools must be installed:
+
+- `chdman`
+- `unzip`
+- `unrar`
+- `7z`
+- `stat`
+- `awk`
+
+Optional (enhancements):
+
+- `file` (better ISO detection)
+- `perl` (improved filename parsing)
+- `uconv` (Unicode normalization)
+- `systemd-cat` / `logger` (logging backends)
+
+---
+
+## 🧪 Dry Run Mode
+
+Use `--dry-run` to preview actions:
+
+```bash
+./chdtool.sh -n /roms
+```
+
+- No files are created, moved, or deleted
+- All intended operations are logged
+
+---
+
+## ⚠️ Notes
+
+- DVD support requires a version of `chdman` with `createdvd`
+- CUE files referencing missing files will fail validation
+- Temporary files are cleaned automatically, even on interruption
+
+---
+
+## 🛠️ Design Goals
+
+- Safe by default (verify before replace)
+- Idempotent (re-runs don’t duplicate work)
+- Transparent logging
+- Minimal dependencies
+- Works well on large ROM collections
+
+---
+
+## 📌 Future Ideas
+
+- Parallel processing
+- Better metadata integration
+- Optional compression tuning
+- Integration with tools like Retromount / ROM managers
