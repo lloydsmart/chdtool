@@ -1266,17 +1266,17 @@ process_input() {
         fi
     fi
 
-    # If all expected CHDs already exist and verify, remove original and done
+    # If all expected CHDs already exist and verify, generate the complete-set
+    # playlist before treating source removal as the final action.
     if [[ "$input_failed" != true ]] && verify_chds "$outdir" "${expected_chds[@]}"; then
         log INFO "✅ All expected CHDs verified for $input_file"
-        _remove_input_if_allowed
-        # Per-iteration M3U generation for already-present sets
         if [[ ${#expected_chds[@]} -gt 0 ]]; then
             local chd_base
             chd_base="$(basename "${expected_chds[0]}" .chd)"
             log DEBUG "🔤 Raw base name: $chd_base"
             maybe_generate_m3u_for "$chd_base" "$outdir"
         fi
+        _remove_input_if_allowed
         return 0
     fi
 
@@ -1409,8 +1409,6 @@ process_input() {
                 chds_created=$((chds_created + 1))
             done
 
-            _remove_input_if_allowed
-            
             for chd in "${expected_chds[@]}"; do
                 if [[ -f "$outdir/$chd" ]]; then
                     archive_chd_size=$((archive_chd_size + $(get_file_size "$outdir/$chd")))
@@ -1436,17 +1434,27 @@ process_input() {
     fi
 
     if [[ "$input_failed" == true ]]; then
+        log WARN "⚠️ Not all expected members converted successfully for $input_file, keeping original"
         _return_failed_input
         return 1
     fi
 
-    # Per-iteration M3U generation (only on success)
+    # Source deletion is the final action. First require the complete expected
+    # final CHD set to exist and pass verification, then generate its playlist.
+    if ! verify_chds "$outdir" "${expected_chds[@]}"; then
+        log WARN "⚠️ Complete final CHD set failed verification for $input_file, keeping original"
+        _return_failed_input
+        return 1
+    fi
+
     if [[ ${#expected_chds[@]} -gt 0 ]]; then
         local chd_base
         chd_base="$(basename "${expected_chds[0]}" .chd)"
         log DEBUG "🔤 Raw base name: $chd_base"
         maybe_generate_m3u_for "$chd_base" "$outdir"
     fi
+
+    _remove_input_if_allowed
 
     return 0
 }

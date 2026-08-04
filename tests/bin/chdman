@@ -11,9 +11,22 @@ case "$1" in
     exit 0
     ;;
   createcd|createdvd)
-    # not used in the test; if called, fail fast so we notice
-    echo "stub chdman: create not supported in test" >&2
-    exit 2
+    input=""
+    output=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -i) input="$2"; shift 2 ;;
+        -o) output="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    if [[ -n "${CHDMAN_FAIL_INPUT:-}" && "$input" == *"$CHDMAN_FAIL_INPUT"* ]]; then
+      echo "stub chdman: requested failure for $input" >&2
+      exit 2
+    fi
+    : > "$output"
+    echo "Compressing, 100% complete (ratio=50%)" >&2
+    exit 0
     ;;
   *)
     echo "stub chdman: unknown args: $*" >&2
