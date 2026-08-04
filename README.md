@@ -1,8 +1,8 @@
+# 🎮 chdtool
+
 [![License](https://img.shields.io/github/license/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/blob/main/LICENSE)
 [![Release](https://img.shields.io/github/v/release/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/releases)
 [![ShellCheck](https://img.shields.io/github/actions/workflow/status/lloydsmart/chdtool/shellcheck.yml?branch=main&label=shellcheck)](https://github.com/lloydsmart/chdtool/actions/workflows/shellcheck.yml)
-
-# 🎮 chdtool
 
 A robust Bash script for converting CD/DVD disc images and archives into **CHD (Compressed Hunks of Data)** format using `chdman`.
 
@@ -48,7 +48,7 @@ Convert everything in a directory:
 ### Options
 
 | Option | Description |
-|------|-------------|
+| ------ | ----------- |
 | `-k`, `--keep-originals` | Do not delete source files after conversion |
 | `-r`, `--recursive` | Process subdirectories |
 | `-n`, `--dry-run` | Show what would happen without making changes |
@@ -74,12 +74,14 @@ Dry run:
 ## 📦 Supported Input Formats
 
 ### Disc images
+
 - `.iso`
 - `.cue` (with referenced BIN/WAV/MP3 validation)
 - `.gdi`
 - `.ccd`
 
 ### Archives
+
 - `.zip`
 - `.rar`
 - `.7z`
@@ -105,7 +107,7 @@ Archives are extracted to a temporary directory and processed automatically.
 
 Example:
 
-```
+```text
 Final Fantasy VII (Disc 1).chd
 Final Fantasy VII (Disc 2).chd
 Final Fantasy VII.m3u
@@ -137,7 +139,7 @@ LOG_TAG=chdtool
 
 Default log file:
 
-```
+```text
 logs/chd_conversion_<timestamp>.log
 ```
 
