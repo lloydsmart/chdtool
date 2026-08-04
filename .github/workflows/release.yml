@@ -16,7 +16,7 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - name: Check out repo
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -43,7 +43,7 @@ jobs:
           zip -j "dist/chdtool-${GITHUB_REF_NAME}.zip" chdtool README.md LICENSE CHANGELOG.md || true
 
       - name: Create GitHub Release and upload assets
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ github.ref_name }}
           body_path: ${{ steps.cliff_notes.outputs.changelog }}   # file generated above
@@ -67,7 +67,7 @@ jobs:
           GITHUB_REPO: ${{ github.repository }}
 
       - name: Open PR to update CHANGELOG.md on main
-        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           commit-message: "chore(changelog): update for ${{ github.ref_name }}"
           branch: chore/update-changelog-${{ github.ref_name }}
