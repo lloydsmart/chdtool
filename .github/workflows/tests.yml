@@ -1,10 +1,26 @@
-name: tests
+name: Tests
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "chdtool.sh"
+      - "Makefile"
+      - "tests/**"
+      - ".github/workflows/tests.yml"
+  pull_request:
+    paths:
+      - "chdtool.sh"
+      - "Makefile"
+      - "tests/**"
+      - ".github/workflows/tests.yml"
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
-  pull-requests: write
-on:
-  push:
-  pull_request:
 
 jobs:
   tests:
@@ -12,25 +28,19 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Install test deps
         run: |
           sudo apt-get update
           sudo apt-get install -y unzip zip make
 
-      - name: Debug workspace
-        run: |
-          pwd
-          ls -la
-          sed -n '1,120p' Makefile
-
       - name: Run tests
         run: make test
 
       - name: Upload logs from tests (always)
         if: ${{ always() }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: logs-from-tests
           path: logs/
