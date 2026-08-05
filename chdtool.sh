@@ -1188,16 +1188,12 @@ convert_disc_file() {
     # Decide CD vs DVD and pick subcommand + icon
     local disc_type
     disc_type="$(detect_disc_type "$file")"
-    local hunk_size=2448 #Default
-
     local subcmd icon
     case "$disc_type" in
         ps2)
-            # PS2 is the special case; Hunk is ALWAYS 2048, but command depends on size
             log DEBUG "PS2 image detected, checking size to determine if DVD structure is likely"
             local sz
             sz=$(get_file_size "$file")
-            hunk_size=2048
             if (( sz >= 1000000000 )); then
                 log DEBUG "Large PS2 image suggests DVD structure, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
                 if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
@@ -1218,7 +1214,6 @@ convert_disc_file() {
             log DEBUG "DVD detected, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
             if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
                 subcmd="createdvd"
-                hunk_size=2048 # DVD-ROM and PS2/PSP discs use standard 2K data sectors
                 icon="📀"
             else
                 log WARN "⚠️ Detected DVD image but this chdman lacks 'createdvd'. Skipping: $file"
@@ -1228,44 +1223,52 @@ convert_disc_file() {
         ps1|dreamcast|segacd|saturn|cd)
             log DEBUG "CD-type image detected, using createcd"
             subcmd="createcd"
-            hunk_size=2448 # CD-ROMs use 2352-byte raw sectors but chdman createcd expects 2448 to include subchannel data for full disc preservation
             icon="💿"
             ;;
         *)
             log WARN "⚠️ Unknown disc type detected, defaulting to CD settings: $file"
             subcmd="createcd"
-            hunk_size=2448
             icon="💿"
             ;;
     esac
 
     log INFO "$icon Detected $disc_type image → using chdman $subcmd"
 
-    # Calculate safe threads: ~one thread per 2GB RAM (for CDs) or 4GB RAM (for DVDs)
-    local total_ram_mb=$(( $(awk '/MemTotal|SwapTotal/{sum+=$2} END{print sum}' /proc/meminfo) / 1024 ))
-    local available_ram=$total_ram_mb
-
-    if [[ "$IS_RAM_DISK" == true ]]; then
-        local iso_size_mb=$(( $(stat -c%s "$file") / 1048576 ))
-        (( available_ram = total_ram_mb - iso_size_mb))
-        log DEBUG "📉 RAM disk detected. Adjusting available RAM for chdman to ${available_ram}MB"
-    fi
-
+    # Base concurrency on currently available physical memory. Swap is not
+    # interchangeable with RAM for compression and can cause severe thrashing.
+    local available_ram
+    available_ram=$(( $(awk '/^MemAvailable:/{print $2; found=1} END{if(!found) print 0}' /proc/meminfo 2>/dev/null) / 1024 ))
+    (( available_ram < 1 )) && available_ram=1024
     local cpu_cores
-    cpu_cores=$(nproc)
+    cpu_cores=$(nproc 2>/dev/null || echo 1)
+    (( cpu_cores < 1 )) && cpu_cores=1
     local ram_per_thread=2048   # Default for CDs
 
     if [[ "$subcmd" == "createdvd" ]]; then
         ram_per_thread=4096  # 4GB floor for DVDs (LZMA is a beast here)
     fi
 
-    # Calculate threads based on RAM (aiming for ~3GB per thread)
+    # Calculate threads from available RAM, then apply the explicit override.
     local threads=$(( available_ram / ram_per_thread ))
     (( threads < 1 )) && threads=1
     (( threads > cpu_cores )) && threads=$cpu_cores
+    if [[ -n "${CHDMAN_THREADS:-}" ]]; then
+        [[ "$CHDMAN_THREADS" =~ ^[1-9][0-9]*$ ]] || { log ERROR "❌ CHDMAN_THREADS must be a positive integer"; return 1; }
+        threads="$CHDMAN_THREADS"
+        (( threads > cpu_cores )) && threads=$cpu_cores
+    fi
+
+    local -a chdman_args=("$subcmd" -np "$threads")
+    if [[ -n "${CHDMAN_HUNK_SIZE:-}" ]]; then
+        [[ "$CHDMAN_HUNK_SIZE" =~ ^[1-9][0-9]*$ ]] || { log ERROR "❌ CHDMAN_HUNK_SIZE must be a positive integer"; return 1; }
+        chdman_args+=(-hs "$CHDMAN_HUNK_SIZE")
+    fi
+    chdman_args+=(-i "$file")
 
     if [[ "$DRY_RUN" == true ]]; then
-        log INFO "🧪 (dry-run) Would run: ${CHDMAN_BIN:-chdman} $subcmd -np $threads -i \"$file\" -o a unique temporary CHD beside \"$chd_path\""
+        local command_preview
+        printf -v command_preview '%q ' "${CHDMAN_BIN:-chdman}" "${chdman_args[@]}" -o "<unique temporary CHD beside $chd_path>"
+        log INFO "🧪 (dry-run) Would run: ${command_preview% }"
         return 0
     fi
 
@@ -1282,16 +1285,17 @@ convert_disc_file() {
     track_temp_file "$tmp_chd"
     [[ -n "$result_var" ]] && printf -v "$result_var" '%s' "$tmp_chd"
     log INFO "🔧 Converting: $file -> $tmp_chd"
+    local -a command=("${CHDMAN_BIN:-chdman}" "${chdman_args[@]}" -o "$tmp_chd")
 
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-        if ! PHASE_DEFAULT="Converting" stdbuf -oL -eL "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
+        if ! PHASE_DEFAULT="Converting" stdbuf -oL -eL "${command[@]}" 2>&1 | _chdman_progress_filter; then
             log ERROR "❌ chdman $subcmd failed for: $file"
             cleanup_temp_file_now "$tmp_chd"
             cleanup_temp_dir_now "$tmp_dir"
             return 1
         fi
     else
-        if ! "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd"; then
+        if ! "${command[@]}"; then
             log ERROR "❌ chdman $subcmd failed for: $file"
             cleanup_temp_file_now "$tmp_chd"
             cleanup_temp_dir_now "$tmp_dir"
@@ -1299,8 +1303,6 @@ convert_disc_file() {
         fi
     fi
 
-    sync
-    sleep 1
     return 0
 }
 
@@ -1542,7 +1544,8 @@ process_input() {
 
     if [[ "$DRY_RUN" == true ]]; then
         for disc in "${disc_files[@]}"; do
-            log INFO "🧪 (dry-run) Would convert: $disc -> $outdir/$(basename "${disc%.*}").chd"
+            local dry_result=""
+            convert_disc_file "$disc" "$outdir" "" dry_result || input_failed=true
         done
 
         # Dry-run: also show M3U intent (if this looks like a multi-disc set)
@@ -1552,6 +1555,7 @@ process_input() {
             maybe_generate_m3u_for "$chd_base" "$outdir"
         fi
         
+        [[ "$input_failed" == true ]] && { _return_failed_input; return 1; }
         return 0
     fi
 
