@@ -3,6 +3,95 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.0.0),
 and uses semantic versioning for tags (vMAJOR.MINOR.PATCH).
+## [0.3.0] - 2026-08-05
+
+### CI
+
+- Update actions/checkout to v5 and opt into Node 24
+- Upgrade upload-artifact to v6 for Node 24 compatibility
+- Strengthen repository quality checks
+- Document markdownlint exclusions
+- Resolve shellcheck warnings (#31, #32)
+
+### Chores
+
+- *(logging)* Stop dumping full chdman -help output during createdvd detection
+- Add debug logging for expected chd names and cue validation success
+- Change error message to be more informative
+- *(deps)* Bump the github-actions group with 4 updates
+- Annotate trap callbacks for shellcheck
+- Harden release packaging and CLI (#34)
+- *(changelog)* Update for v0.2.5
+- Backport v0.2.5 release state
+- Prepare v0.3.0
+
+### Docs
+
+- Overhaul README with clickable badges and comprehensive documentation
+- Tweaks to README
+- Fix markdown lint violations
+- Document validation and resource controls (#31, #32)
+- Document release procedure
+
+### Features
+
+- Implement CUE-to-BIN sniffing for accurate console detection
+- *(tempdir)* Allow TMPDIR override for temporary workspace
+- Add override for unverified cue audio tracks
+
+### Fixes
+
+- Resolve race condition and refine PS2 CD/DVD handling
+- Implement strict extraction validation to handle corrupt archives
+- Remove unsupported PCRE non-capturing group from parse_disc_info regex
+- Prevent double counting of failures across helper functions
+- Centralise failure accounting in process_input()
+- *(process_input)* Only generate M3U when input processing succeeds
+- *(archives)* Parse 7z technical listing instead of table output
+- *(archives)* Protect unzip/unrar calls with `--` to stop option parsing
+- *(cue)* Normalize Windows-style paths when validating FILE references
+- *(chdman)* Detect createdvd support via explicit help probe
+- *(detection)* Guard header sniff in detect_disc_type against pipefail
+- *(archives)* Preserve subdir context in CHD output names and avoid collisions
+- *(progress)* Avoid subshell in chdman progress filter
+- *(cue)* Make BIN path detection more robust
+- *(cue)* Prefer data track when choosing sniff target
+- *(cleanup)* Correctly untrack temp dirs after early deletion
+- *(workflow)* Update permissions for workflow files
+- Count failed inputs consistently in process_input
+- Count failed inputs once and stop on hard extraction errors
+- Prioritise descriptor files when selecting disc inputs from archives
+- Apply descriptor priority when discovering extracted disc files
+- Allow wav audio tracks in cue validation
+- Fail cue validation on lossy or unverified audio tracks
+- Make source deletion transactional
+- Use unique tracked temporary CHD outputs
+- Support reliable partial resume states
+- Return non-zero status for input failures
+- Harden descriptor and archive validation (#32)
+
+### Other
+
+- Trace CUE-to-BIN resolution path in detect_disc_type
+- *(tempdir)* Isolate temporary workspace per run
+
+### Performance
+
+- Improve chdman resource handling (#31)
+
+### Refactoring
+
+- Refine console fingerprinting to reduce PS1 false positives
+- Consolidate disc size detection and add surgical debugging
+- *(process_input)* Centralise input removal with _remove_input_if_allowed()
+- *(temp)* Avoid double bookkeeping of per-input temp directories
+- *(disc-detection)* Remove duplicate label definitions in parse_disc_info
+- *(process_input)* Reduce nesting in conversion flow
+
+### Tests
+
+- Clarify partial resume assertion
+- Expand conversion regression coverage (#33)
 ## [0.2.5] - 2026-02-07
 
 ### Chores
