@@ -3,9 +3,9 @@ SHELL := /usr/bin/env bash
 # Path to your script; override with: make test SCRIPT=./path/to/script.sh
 SCRIPT ?= ./chdtool.sh
 
-.PHONY: test test-m3u test-m3u-single test-transactional-source-deletion test-temporary-chd-cleanup test-logging test-setup clean changelog changelog-tag
+.PHONY: test test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-logging test-setup clean changelog changelog-tag
 
-test: test-setup test-m3u test-m3u-single test-transactional-source-deletion test-temporary-chd-cleanup test-logging
+test: test-setup test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-logging
 
 test-setup:
 	chmod +x tests/bin/chdman
@@ -13,6 +13,7 @@ test-setup:
 	-chmod +x tests/bin/7z
 	chmod +x tests/test_m3u.sh tests/test_m3u_single.sh tests/test_transactional_source_deletion.sh
 	chmod +x tests/test_temporary_chd_cleanup.sh
+	chmod +x tests/test_partial_resume.sh
 	@if [ -f tests/test_logging.sh ]; then chmod +x tests/test_logging.sh; fi
 
 test-m3u:
@@ -20,6 +21,9 @@ test-m3u:
 
 test-m3u-single:
 	SCRIPT=$(SCRIPT) bash tests/test_m3u_single.sh
+
+test-partial-resume:
+	SCRIPT=$(SCRIPT) bash tests/test_partial_resume.sh
 
 test-transactional-source-deletion:
 	SCRIPT=$(SCRIPT) bash tests/test_transactional_source_deletion.sh
