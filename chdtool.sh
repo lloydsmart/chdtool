@@ -447,6 +447,8 @@ _now_ms() {
 # Use with: PHASE_DEFAULT="Converting" chdman createcd … | _chdman_progress_filter
 #        or: PHASE_DEFAULT="Verifying"  chdman verify … | _chdman_progress_filter
 _chdman_progress_filter() {
+    # Invoked indirectly by the traps below.
+    # shellcheck disable=SC2317
     _restore_wrap() { _term_print "\033[?7h"; }
     trap '_restore_wrap; return 130' INT TERM
     trap _restore_wrap EXIT
@@ -764,12 +766,16 @@ cleanup_temp_dir_now() {
   done
 }
 
+# Invoked indirectly through _on_interrupt's signal trap.
+# shellcheck disable=SC2317
 _restore_wrap_global() {
   # Make sure terminal autowrap is re-enabled and the progress line cleared
   # (safe to emit even if no progress was showing)
   _term_print "\r\033[2K\033[?7h\n"
 }
 
+# Invoked indirectly by the EXIT trap and the signal handler.
+# shellcheck disable=SC2317
 cleanup_all() {
     # Temp dirs
     for d in "${TEMP_DIRS[@]:-}"; do
@@ -786,6 +792,8 @@ cleanup_all() {
     done
 }
 
+# Invoked indirectly by the INT and TERM traps.
+# shellcheck disable=SC2317
 _on_interrupt() {
   # One place to handle Ctrl-C/TERM: restore terminal, clean, then exit(130)
   _restore_wrap_global
