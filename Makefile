@@ -3,9 +3,9 @@ SHELL := /usr/bin/env bash
 # Path to your script; override with: make test SCRIPT=./path/to/script.sh
 SCRIPT ?= ./chdtool.sh
 
-.PHONY: test test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-logging test-setup clean changelog changelog-tag
+.PHONY: test test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-exit-status test-logging test-setup clean changelog changelog-tag
 
-test: test-setup test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-logging
+test: test-setup test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-exit-status test-logging
 
 test-setup:
 	chmod +x tests/bin/chdman
@@ -14,6 +14,7 @@ test-setup:
 	chmod +x tests/test_m3u.sh tests/test_m3u_single.sh tests/test_transactional_source_deletion.sh
 	chmod +x tests/test_temporary_chd_cleanup.sh
 	chmod +x tests/test_partial_resume.sh
+	chmod +x tests/test_exit_status.sh
 	@if [ -f tests/test_logging.sh ]; then chmod +x tests/test_logging.sh; fi
 
 test-m3u:
@@ -30,6 +31,9 @@ test-transactional-source-deletion:
 
 test-temporary-chd-cleanup:
 	SCRIPT=$(SCRIPT) bash tests/test_temporary_chd_cleanup.sh
+
+test-exit-status:
+	SCRIPT=$(SCRIPT) bash tests/test_exit_status.sh
 
 test-logging:
 	@if [ -f tests/test_logging.sh ]; then \

@@ -1235,6 +1235,8 @@ process_input() {
     local outdir
     outdir="$(dirname "$input_file")"
     local archive_entries=()
+    local archive_listing=""
+    local archive_listing_exit=0
     local disc_files=()
     local expected_chds=()
     local archive_size_bytes
@@ -1277,9 +1279,26 @@ process_input() {
     if is_in_list "$ext" "${archive_exts[@]}"; then
         archives_processed=$((archives_processed + 1))
         case "$ext" in
-            zip) mapfile -t archive_entries < <(unzip -Z1 -- "$input_file" | grep -Ei "$ext_regex") ;;
-            rar) mapfile -t archive_entries < <(unrar lb -- "$input_file" | grep -Ei "$ext_regex") ;;
-            7z|7zip) mapfile -t archive_entries < <(7z l -slt -- "$input_file" 2>/dev/null | awk -v IGNORECASE=1 -v re="$ext_regex" '/^Path = /{p=substr($0,8); if(p~re) print p}') ;;
+            zip)
+                if archive_listing="$(unzip -Z1 -- "$input_file")"; then :; else archive_listing_exit=$?; fi
+                ;;
+            rar)
+                if archive_listing="$(unrar lb -- "$input_file")"; then :; else archive_listing_exit=$?; fi
+                ;;
+            7z|7zip)
+                if archive_listing="$(7z l -slt -- "$input_file")"; then :; else archive_listing_exit=$?; fi
+                ;;
+        esac
+
+        if [[ $archive_listing_exit -ne 0 ]]; then
+            log ERROR "❌ Archive listing failed for $input_file (Exit code: $archive_listing_exit). Skipping."
+            _return_failed_input
+            return 1
+        fi
+
+        case "$ext" in
+            zip|rar) mapfile -t archive_entries < <(grep -Ei "$ext_regex" <<< "$archive_listing" || true) ;;
+            7z|7zip) mapfile -t archive_entries < <(awk -v IGNORECASE=1 -v re="$ext_regex" '/^Path = /{p=substr($0,8); if(p~re) print p}' <<< "$archive_listing") ;;
         esac
 
         if [[ ${#archive_entries[@]} -gt 0 ]]; then
@@ -1570,4 +1589,10 @@ log INFO "📦 Archives processed: $archives_processed"
 log INFO "💿 CHDs created:       $chds_created"
 log INFO "❌ Failures:           $failures"
 log INFO "⏱️ Elapsed time: $(format_duration $(( $(date +%s) - script_start_time )))"
-log INFO "✅ Done!"
+if [[ $failures -gt 0 ]]; then
+    log ERROR "⚠️ Completed with failures ($failures input(s) failed)."
+    exit 2
+fi
+
+log INFO "✅ Completed successfully."
+exit 0
