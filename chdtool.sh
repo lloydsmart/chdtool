@@ -1242,6 +1242,17 @@ process_input() {
     local ext_regex
     ext_regex="$(build_ext_regex "${disc_exts[@]}")"
     local temp_dir=""
+    declare -A output_states=()
+    declare -A output_temps=()
+
+    _all_outputs_complete() {
+        local expected state
+        for expected in "${expected_chds[@]}"; do
+            state="${output_states[$expected]:-missing}"
+            [[ "$state" == "already_verified" || "$state" == "finalised" ]] || return 1
+        done
+        return 0
+    }
 
     _return_failed_input() {
         failures=$((failures + 1))
@@ -1303,9 +1314,19 @@ process_input() {
         fi
     fi
 
+    # Establish one authoritative state for every expected output.
+    local expected_chd
+    for expected_chd in "${expected_chds[@]}"; do
+        if [[ -f "$outdir/$expected_chd" ]] && verify_chds "$outdir" "$expected_chd"; then
+            output_states["$expected_chd"]="already_verified"
+        else
+            output_states["$expected_chd"]="missing"
+        fi
+    done
+
     # If all expected CHDs already exist and verify, generate the complete-set
     # playlist before treating source removal as the final action.
-    if [[ "$input_failed" != true ]] && verify_chds "$outdir" "${expected_chds[@]}"; then
+    if [[ "$input_failed" != true ]] && _all_outputs_complete; then
         log INFO "✅ All expected CHDs verified for $input_file"
         if [[ ${#expected_chds[@]} -gt 0 ]]; then
             local chd_base
@@ -1415,13 +1436,18 @@ process_input() {
             chd_name="$(archive_entry_to_chd_name "$entry")"   # e.g. "CD1 - Game.chd"
             chd_base="${chd_name%.chd}"                        # e.g. "CD1 - Game"
 
+            [[ "${output_states[$chd_name]:-missing}" == "already_verified" ]] && continue
+
             local converted_tmp=""
             if convert_disc_file "$extracted" "$outdir" "$chd_base" converted_tmp; then
                 if [[ -n "$converted_tmp" ]]; then
                     tmp_chds+=("$converted_tmp")
                     final_chds+=("$outdir/$chd_name")
+                    output_temps["$chd_name"]="$converted_tmp"
+                    output_states["$chd_name"]="converted_pending_verification"
                 fi
             else
+                output_states["$chd_name"]="failed"
                 input_failed=true
             fi
         done
@@ -1433,66 +1459,67 @@ process_input() {
     else
         # Non-archive inputs keep the old behaviour
         for disc in "${disc_files[@]}"; do
+            local chd_name
+            chd_name="$(get_chd_basename "$disc").chd"
+            [[ "${output_states[$chd_name]:-missing}" == "already_verified" ]] && continue
+
             local converted_tmp=""
             if convert_disc_file "$disc" "$outdir" "" converted_tmp; then
                 if [[ -n "$converted_tmp" ]]; then
                     tmp_chds+=("$converted_tmp")
-                    final_chds+=("$outdir/$(basename "${disc%.*}").chd")
+                    final_chds+=("$outdir/$chd_name")
+                    output_temps["$chd_name"]="$converted_tmp"
+                    output_states["$chd_name"]="converted_pending_verification"
                 fi
             else
+                output_states["$chd_name"]="failed"
                 input_failed=true
             fi
         done
     fi
 
-    # Verify .tmp CHDs and finalize
+    # Verify and finalise pending outputs independently. Existing verified
+    # outputs are never added to this temporary-output verification pass.
     if [[ "$DRY_RUN" != true && ${#tmp_chds[@]} -gt 0 ]]; then
-        if verify_chds "" "${tmp_chds[@]}"; then
-            local i
-            for i in "${!tmp_chds[@]}"; do
-                local tmp_chd="${tmp_chds[$i]}"
-                local final_chd="${final_chds[$i]}"
+        local chd_name tmp_chd final_chd
+        for chd_name in "${expected_chds[@]}"; do
+            [[ "${output_states[$chd_name]:-missing}" == "converted_pending_verification" ]] || continue
+            tmp_chd="${output_temps[$chd_name]}"
+            final_chd="$outdir/$chd_name"
+            if verify_chds "" "$tmp_chd"; then
                 mv -f -- "$tmp_chd" "$final_chd"
                 untrack_temp_file "$tmp_chd"
                 cleanup_temp_dir_now "$(dirname "$tmp_chd")"
                 log INFO "🔄 Replaced old CHD with new verified CHD: $final_chd"
                 chds_created=$((chds_created + 1))
-            done
-
-            for chd in "${expected_chds[@]}"; do
-                if [[ -f "$outdir/$chd" ]]; then
-                    archive_chd_size=$((archive_chd_size + $(get_file_size "$outdir/$chd")))
-                fi
-            done
-            if [[ $archive_size_bytes -gt 0 ]]; then
-                local saving=$((archive_size_bytes - archive_chd_size))
-                local saving_percent=$((100 * saving / archive_size_bytes))
-                log INFO "📉 Space saving for $(basename "$input_file"): $(human_readable "$archive_size_bytes") → $(human_readable "$archive_chd_size"), saved $(human_readable "$saving") (${saving_percent}%)"
-                total_original_size=$((total_original_size + archive_size_bytes))
-                total_chd_size=$((total_chd_size + archive_chd_size))
-            fi
-        else
-            for tmp_chd in "${tmp_chds[@]}"; do
+                output_states["$chd_name"]="finalised"
+            else
                 cleanup_temp_file_now "$tmp_chd"
                 cleanup_temp_dir_now "$(dirname "$tmp_chd")"
-            done
-            input_failed=true
-            log WARN "⚠️ CHD verification failed after conversion for $input_file, keeping original"
-        fi
+                output_states["$chd_name"]="failed"
+                input_failed=true
+                log WARN "⚠️ CHD verification failed after conversion for $chd_name"
+            fi
+        done
     fi
 
-    if [[ "$input_failed" == true ]]; then
+    if [[ "$input_failed" == true ]] || ! _all_outputs_complete; then
         log WARN "⚠️ Not all expected members converted successfully for $input_file, keeping original"
         _return_failed_input
         return 1
     fi
 
-    # Source deletion is the final action. First require the complete expected
-    # final CHD set to exist and pass verification, then generate its playlist.
-    if ! verify_chds "$outdir" "${expected_chds[@]}"; then
-        log WARN "⚠️ Complete final CHD set failed verification for $input_file, keeping original"
-        _return_failed_input
-        return 1
+    # Source deletion, accounting, and M3U generation all consume the same
+    # complete manifest rather than independently inferring success.
+    for chd_name in "${expected_chds[@]}"; do
+        archive_chd_size=$((archive_chd_size + $(get_file_size "$outdir/$chd_name")))
+    done
+    if [[ $archive_size_bytes -gt 0 ]]; then
+        local saving=$((archive_size_bytes - archive_chd_size))
+        local saving_percent=$((100 * saving / archive_size_bytes))
+        log INFO "📉 Space saving for $(basename "$input_file"): $(human_readable "$archive_size_bytes") → $(human_readable "$archive_chd_size"), saved $(human_readable "$saving") (${saving_percent}%)"
+        total_original_size=$((total_original_size + archive_size_bytes))
+        total_chd_size=$((total_chd_size + archive_chd_size))
     fi
 
     if [[ ${#expected_chds[@]} -gt 0 ]]; then

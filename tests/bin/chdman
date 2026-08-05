@@ -6,6 +6,17 @@ case "$1" in
     echo "chdman 0.000 (stub) - createdvd createcd verify"; exit 0
     ;;
   verify)
+    verify_input=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -i) verify_input="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    if [[ -f "$verify_input" ]] && grep -q '^INVALID$' "$verify_input"; then
+      echo "invalid CHD" >&2
+      exit 2
+    fi
     # your script greps for "complete" and optionally "(ratio=..%)"
     echo "Verifying, 100% complete (ratio=50%)" >&2
     exit 0
@@ -31,7 +42,8 @@ case "$1" in
       echo "stub chdman: requested failure for $input" >&2
       exit 2
     fi
-    : > "$output"
+    [[ -n "${CHDMAN_CREATE_LOG:-}" ]] && printf '%s\n' "$input" >> "$CHDMAN_CREATE_LOG"
+    printf 'converted:%s\n' "$input" > "$output"
     echo "Compressing, 100% complete (ratio=50%)" >&2
     exit 0
     ;;
