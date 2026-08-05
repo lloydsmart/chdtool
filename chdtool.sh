@@ -736,6 +736,22 @@ declare -a TEMP_FILES=()
 track_temp_dir()  { TEMP_DIRS+=("$1"); }
 track_temp_file() { TEMP_FILES+=("$1"); }
 
+untrack_temp_file() {
+  local f="$1" i
+  for i in "${!TEMP_FILES[@]}"; do
+    [[ "${TEMP_FILES[$i]}" == "$f" ]] && unset 'TEMP_FILES[$i]'
+  done
+}
+
+cleanup_temp_file_now() {
+  local f="$1"
+  if [[ -n "$f" && -f "$f" ]]; then
+    rm -f -- "$f"
+    log INFO "🗑️ Removed temp file: $f"
+  fi
+  untrack_temp_file "$f"
+}
+
 cleanup_temp_dir_now() {
   local d="$1"
   [[ -n "$d" && -d "$d" ]] || return 0
@@ -790,13 +806,15 @@ verify_chds() {
 
     if [[ "$DRY_RUN" == true ]]; then
         for chd in "${chds[@]}"; do
-            log INFO "🧪 (dry-run) Would verify: $outdir/$chd"
+            [[ -n "$outdir" ]] && chd="$outdir/$chd"
+            log INFO "🧪 (dry-run) Would verify: $chd"
         done
         return 0
     fi
 
     for chd in "${chds[@]}"; do
-        local chd_path="$outdir/$chd"
+        local chd_path="$chd"
+        [[ -n "$outdir" ]] && chd_path="$outdir/$chd"
         if [[ ! -f "$chd_path" ]]; then
             all_verified=false
             break
@@ -1059,6 +1077,9 @@ convert_disc_file() {
     local file="$1"
     local outdir="$2"
     local base_override="${3:-}"
+    local result_var="${4:-}"
+
+    [[ -n "$result_var" ]] && printf -v "$result_var" '%s' ""
 
     # If it's a CUE, validate referenced files first
     if [[ "${file,,}" == *.cue ]]; then
@@ -1076,7 +1097,6 @@ convert_disc_file() {
     fi
 
     local chd_path="$outdir/$base.chd"
-    local tmp_chd="$outdir/$base.chd.tmp"
 
     # If a CHD already exists, verify it and skip if good
     if [[ -f "$chd_path" ]]; then
@@ -1144,7 +1164,6 @@ convert_disc_file() {
     esac
 
     log INFO "$icon Detected $disc_type image → using chdman $subcmd"
-    log INFO "🔧 Converting: $file -> $tmp_chd"
 
     # Calculate safe threads: ~one thread per 2GB RAM (for CDs) or 4GB RAM (for DVDs)
     local total_ram_mb=$(( $(awk '/MemTotal|SwapTotal/{sum+=$2} END{print sum}' /proc/meminfo) / 1024 ))
@@ -1170,18 +1189,36 @@ convert_disc_file() {
     (( threads > cpu_cores )) && threads=$cpu_cores
 
     if [[ "$DRY_RUN" == true ]]; then
-        log INFO "🧪 (dry-run) Would run: ${CHDMAN_BIN:-chdman} $subcmd -np $threads -i \"$file\" -o \"$tmp_chd\""
+        log INFO "🧪 (dry-run) Would run: ${CHDMAN_BIN:-chdman} $subcmd -np $threads -i \"$file\" -o a unique temporary CHD beside \"$chd_path\""
         return 0
     fi
 
+    # Reserve a unique location in the destination filesystem. Keeping the
+    # reservation directory until finalisation prevents concurrent runs from
+    # ever allocating or writing the same temporary path.
+    local tmp_dir tmp_chd
+    tmp_dir="$(mktemp -d -p "$outdir" ".${base}.chd.tmp.${RUN_ID}.XXXXXX")" || {
+        log ERROR "❌ Could not allocate temporary CHD path for: $chd_path"
+        return 1
+    }
+    track_temp_dir "$tmp_dir"
+    tmp_chd="$tmp_dir/$base.chd"
+    track_temp_file "$tmp_chd"
+    [[ -n "$result_var" ]] && printf -v "$result_var" '%s' "$tmp_chd"
+    log INFO "🔧 Converting: $file -> $tmp_chd"
+
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-    if ! PHASE_DEFAULT="Converting" stdbuf -oL -eL "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
+        if ! PHASE_DEFAULT="Converting" stdbuf -oL -eL "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
             log ERROR "❌ chdman $subcmd failed for: $file"
+            cleanup_temp_file_now "$tmp_chd"
+            cleanup_temp_dir_now "$tmp_dir"
             return 1
         fi
     else
         if ! "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd"; then
             log ERROR "❌ chdman $subcmd failed for: $file"
+            cleanup_temp_file_now "$tmp_chd"
+            cleanup_temp_dir_now "$tmp_dir"
             return 1
         fi
     fi
@@ -1350,6 +1387,7 @@ process_input() {
 
     local archive_chd_size=0
     local tmp_chds=()
+    local final_chds=()
 
     if [[ "$DRY_RUN" == true ]]; then
         for disc in "${disc_files[@]}"; do
@@ -1377,8 +1415,12 @@ process_input() {
             chd_name="$(archive_entry_to_chd_name "$entry")"   # e.g. "CD1 - Game.chd"
             chd_base="${chd_name%.chd}"                        # e.g. "CD1 - Game"
 
-            if convert_disc_file "$extracted" "$outdir" "$chd_base"; then
-                tmp_chds+=("$outdir/$chd_name.tmp")
+            local converted_tmp=""
+            if convert_disc_file "$extracted" "$outdir" "$chd_base" converted_tmp; then
+                if [[ -n "$converted_tmp" ]]; then
+                    tmp_chds+=("$converted_tmp")
+                    final_chds+=("$outdir/$chd_name")
+                fi
             else
                 input_failed=true
             fi
@@ -1391,8 +1433,12 @@ process_input() {
     else
         # Non-archive inputs keep the old behaviour
         for disc in "${disc_files[@]}"; do
-            if convert_disc_file "$disc" "$outdir"; then
-                tmp_chds+=("$outdir/$(basename "${disc%.*}").chd.tmp")
+            local converted_tmp=""
+            if convert_disc_file "$disc" "$outdir" "" converted_tmp; then
+                if [[ -n "$converted_tmp" ]]; then
+                    tmp_chds+=("$converted_tmp")
+                    final_chds+=("$outdir/$(basename "${disc%.*}").chd")
+                fi
             else
                 input_failed=true
             fi
@@ -1401,10 +1447,14 @@ process_input() {
 
     # Verify .tmp CHDs and finalize
     if [[ "$DRY_RUN" != true && ${#tmp_chds[@]} -gt 0 ]]; then
-        if verify_chds "$outdir" "${tmp_chds[@]##*/}"; then
-            for tmp_chd in "${tmp_chds[@]}"; do
-                local final_chd="${tmp_chd%.tmp}"
+        if verify_chds "" "${tmp_chds[@]}"; then
+            local i
+            for i in "${!tmp_chds[@]}"; do
+                local tmp_chd="${tmp_chds[$i]}"
+                local final_chd="${final_chds[$i]}"
                 mv -f -- "$tmp_chd" "$final_chd"
+                untrack_temp_file "$tmp_chd"
+                cleanup_temp_dir_now "$(dirname "$tmp_chd")"
                 log INFO "🔄 Replaced old CHD with new verified CHD: $final_chd"
                 chds_created=$((chds_created + 1))
             done
@@ -1423,10 +1473,8 @@ process_input() {
             fi
         else
             for tmp_chd in "${tmp_chds[@]}"; do
-                if [[ -f "$tmp_chd" ]]; then
-                    rm -f "$tmp_chd"
-                    log INFO "🗑️ Removed failed tmp CHD: $tmp_chd"
-                fi
+                cleanup_temp_file_now "$tmp_chd"
+                cleanup_temp_dir_now "$(dirname "$tmp_chd")"
             done
             input_failed=true
             log WARN "⚠️ CHD verification failed after conversion for $input_file, keeping original"

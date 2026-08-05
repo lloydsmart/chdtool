@@ -20,7 +20,14 @@ case "$1" in
         *) shift ;;
       esac
     done
+    if [[ -n "${CHDMAN_READY_FILE:-}" ]]; then
+      printf '%s\n' "$output" > "$CHDMAN_READY_FILE"
+    fi
+    if [[ -n "${CHDMAN_PAUSE_SECONDS:-}" ]]; then
+      sleep "$CHDMAN_PAUSE_SECONDS"
+    fi
     if [[ -n "${CHDMAN_FAIL_INPUT:-}" && "$input" == *"$CHDMAN_FAIL_INPUT"* ]]; then
+      : > "$output"
       echo "stub chdman: requested failure for $input" >&2
       exit 2
     fi
