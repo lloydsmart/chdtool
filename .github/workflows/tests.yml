@@ -7,12 +7,14 @@ on:
       - "chdtool.sh"
       - "Makefile"
       - "tests/**"
+      - "scripts/**"
       - ".github/workflows/tests.yml"
   pull_request:
     paths:
       - "chdtool.sh"
       - "Makefile"
       - "tests/**"
+      - "scripts/**"
       - ".github/workflows/tests.yml"
 
 concurrency:

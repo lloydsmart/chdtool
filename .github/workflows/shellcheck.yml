@@ -7,12 +7,14 @@ on:
       - "chdtool.sh"
       - "tests/**/*.sh"
       - "tests/bin/*"
+      - "scripts/**/*.sh"
       - ".github/workflows/shellcheck.yml"
   pull_request:
     paths:
       - "chdtool.sh"
       - "tests/**/*.sh"
       - "tests/bin/*"
+      - "scripts/**/*.sh"
       - ".github/workflows/shellcheck.yml"
 
 concurrency:
@@ -32,4 +34,4 @@ jobs:
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Run ShellCheck
-        run: shellcheck chdtool.sh tests/*.sh tests/bin/*
+        run: shellcheck chdtool.sh scripts/*.sh tests/*.sh tests/bin/*

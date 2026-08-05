@@ -1,6 +1,6 @@
 # 🎮 chdtool
 
-[![License](https://img.shields.io/github/license/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/blob/main/LICENSE.md)
 [![Release](https://img.shields.io/github/v/release/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/releases)
 [![ShellCheck](https://img.shields.io/github/actions/workflow/status/lloydsmart/chdtool/shellcheck.yml?branch=main&label=shellcheck)](https://github.com/lloydsmart/chdtool/actions/workflows/shellcheck.yml)
 
@@ -31,7 +31,7 @@ Convert everything in a directory:
 - 📉 Space savings reporting
 - 🧾 Automatic M3U generation for multi-disc sets
 - 🧹 Safe temp directory handling with cleanup traps
-- 🧪 Dry-run mode (no changes made)
+- 🧪 Dry-run mode (no source or conversion changes)
 - 🪵 Structured logging system:
   - Console / file / syslog / journald
   - Configurable verbosity
@@ -52,8 +52,17 @@ Convert everything in a directory:
 | `-k`, `--keep-originals` | Do not delete source files after conversion |
 | `-r`, `--recursive` | Process subdirectories |
 | `-n`, `--dry-run` | Show what would happen without making changes |
+| `-a`, `--allow-unverified-cue-audio` | Permit lossy or unverified CUE audio tracks (not preservation-safe) |
 | `-F`, `--file-tee` | Force logging to file |
 | `-N`, `--no-file-tee` | Disable logging to file |
+| `-h`, `--help` | Show usage information |
+| `-V`, `--version` | Show the packaged version |
+
+Use `--` to end option parsing when an input directory starts with `-`:
+
+```bash
+./chdtool.sh -- -roms
+```
 
 ---
 
@@ -135,6 +144,7 @@ LOG_LEVEL_THRESHOLD=DEBUG|INFO|WARN|ERROR
 LOG_TEE_CONSOLE=auto|1|0
 LOG_TEE_FILE=1|0
 LOG_TAG=chdtool
+LOGFILE=/custom/path/chdtool.log
 ```
 
 Default log file:
@@ -142,6 +152,11 @@ Default log file:
 ```text
 logs/chd_conversion_<timestamp>.log
 ```
+
+`--file-tee` and `--no-file-tee` control the optional file mirror for console,
+syslog, and journald backends. When `LOG_DEST=file`, the file is the primary
+destination and is therefore still written. A caller-supplied `LOGFILE` path is
+used verbatim.
 
 ---
 
@@ -176,6 +191,7 @@ The following tools must be installed:
 - `7z`
 - `stat`
 - `awk`
+- `stdbuf`
 
 Optional (enhancements):
 
@@ -194,8 +210,13 @@ Use `--dry-run` to preview actions:
 ./chdtool.sh -n /roms
 ```
 
-- No files are created, moved, or deleted
+- No source files, CHDs, playlists, or temporary conversion workspaces are
+  created, moved, or deleted
 - All intended operations are logged
+
+Logging remains active during a dry run and may create the configured log file.
+Use `--no-file-tee` with the console, syslog, or journald backend to prevent a
+file mirror.
 
 ### Resource selection
 
@@ -222,6 +243,20 @@ result at the available CPU count with a minimum of one.
 - Archive members are rejected before conversion when paths escape the extraction
   directory, links are present, or selected entries collide after name sanitisation
 - Temporary files are cleaned automatically, even on interruption
+- `--allow-unverified-cue-audio` relaxes preservation checks for lossy or
+  otherwise unverified CUE audio tracks; use it only when accepting that risk
+
+---
+
+## 📦 Release assets
+
+Each release publishes `.tar.gz` and `.zip` archives containing `chdtool`,
+`README.md`, `LICENSE.md`, and `CHANGELOG.md`, plus a standalone `chdtool`
+script. Verify downloads with the published checksum file:
+
+```bash
+sha256sum --check SHA256SUMS
+```
 
 ---
 
