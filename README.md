@@ -157,6 +157,13 @@ At the end of a run:
 - Failures
 - Elapsed time
 
+### Exit statuses
+
+- `0` — clean success, including intentional skips and already-complete inputs
+- `1` — usage, configuration, or startup failure
+- `2` — one or more discovered inputs failed; independent inputs were still processed
+- `130` — interrupted by SIGINT or SIGTERM
+
 ---
 
 ## ⚙️ Requirements

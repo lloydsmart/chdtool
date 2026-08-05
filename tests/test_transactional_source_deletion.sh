@@ -23,8 +23,11 @@ ARCHIVE="$FIX/transactional-game.zip"
   rm -f "Transactional Game (Disc 1).iso" "Transactional Game (Disc 2).iso"
 )
 
-# Issue #30 owns the overall process exit status; this test asserts filesystem effects only.
-bash "$SCRIPT" "$FIX" || true
+set +e
+bash "$SCRIPT" "$FIX"
+status=$?
+set -e
+[[ $status -eq 2 ]] || { echo "FAIL: partial conversion returned $status, expected 2" >&2; exit 1; }
 
 if [[ ! -f "$ARCHIVE" ]]; then
   echo "FAIL: source archive was deleted after a partial conversion" >&2

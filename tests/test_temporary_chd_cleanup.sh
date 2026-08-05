@@ -54,7 +54,14 @@ tmp_path="$(tr -d '\r\n' < "$READY_FILE")"
 }
 
 kill -TERM "$script_pid"
-wait "$script_pid" 2>/dev/null || true
+set +e
+wait "$script_pid" 2>/dev/null
+interrupt_status=$?
+set -e
+[[ $interrupt_status -eq 130 ]] || {
+  echo "FAIL: interruption returned $interrupt_status, expected 130" >&2
+  exit 1
+}
 sleep 2.2
 assert_no_temporary_chds
 [[ ! -e "$FIX/Interrupted Game.chd" ]] || {
