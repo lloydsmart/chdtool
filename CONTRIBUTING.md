@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing to **chdscript**! 🎉
+Thanks for your interest in contributing to **chdtool**! 🎉
 
 ## How to Contribute
 
@@ -22,7 +22,7 @@ Thanks for your interest in contributing to **chdscript**! 🎉
    git push origin feature/my-new-feature
    ```
 
-4. **Open a Pull Request** against `main`.
+4. **Open a Pull Request** against `develop`.
 
 ## Coding Guidelines
 
@@ -47,6 +47,9 @@ Bump version numbers when you:
 - `MAJOR`: Break backward compatibility
 - `MINOR`: Add new functionality in a backward-compatible manner
 - `PATCH`: Fix bugs or make small improvements
+
+Maintainers should follow the complete [release procedure](RELEASING.md) when
+preparing, tagging, publishing, and verifying a release.
 
 ---
 

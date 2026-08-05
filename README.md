@@ -258,6 +258,9 @@ script. Verify downloads with the published checksum file:
 sha256sum --check SHA256SUMS
 ```
 
+Maintainers should use the documented [release procedure](RELEASING.md) rather
+than creating tags or assets manually.
+
 ---
 
 ## 🛠️ Design Goals
