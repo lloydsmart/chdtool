@@ -1,25 +1,28 @@
 # Contributing
 
-Thanks for your interest in contributing to **chdscript**! 🎉
+Thanks for your interest in contributing to **chdtool**! 🎉
 
 ## How to Contribute
 
-1. **Fork the repo** and create your feature branch:  
+1. **Fork the repo** and create your feature branch:
+
    ```bash
    git checkout -b feature/my-new-feature
    ```
 
-2. **Commit your changes** with clear messages:  
+2. **Commit your changes** with clear messages:
+
    ```bash
    git commit -m "Add support for XYZ"
    ```
 
-3. **Push to the branch**:  
+3. **Push to the branch**:
+
    ```bash
    git push origin feature/my-new-feature
    ```
 
-4. **Open a Pull Request** against `main`.
+4. **Open a Pull Request** against `develop`.
 
 ## Coding Guidelines
 
@@ -37,11 +40,16 @@ Thanks for your interest in contributing to **chdscript**! 🎉
 
 ## Versioning
 
-We use [Semantic Versioning](https://semver.org/) (semver).  
+We use [Semantic Versioning](https://semver.org/) (semver).
+
 Bump version numbers when you:
+
 - `MAJOR`: Break backward compatibility
 - `MINOR`: Add new functionality in a backward-compatible manner
 - `PATCH`: Fix bugs or make small improvements
+
+Maintainers should follow the complete [release procedure](RELEASING.md) when
+preparing, tagging, publishing, and verifying a release.
 
 ---
 

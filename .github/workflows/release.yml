@@ -12,18 +12,29 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Install test and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make shellcheck unzip zip
+
+      - name: Run tests and ShellCheck
+        run: |
+          make test
+          shellcheck chdtool.sh scripts/*.sh tests/*.sh tests/bin/*
+
       # Generate release notes for this tag (used as Release body)
       - name: Generate release notes with git-cliff
         id: cliff_notes
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
         with:
           config: cliff.toml
           # notes only for the pushed tag, without the big header
@@ -35,20 +46,18 @@ jobs:
       - name: Prepare artifacts
         run: |
           set -euo pipefail
-          chmod +x chdtool.sh || true
-          cp chdtool.sh chdtool
-          mkdir -p dist
-          tar -czf "dist/chdtool-${GITHUB_REF_NAME}.tar.gz" chdtool README.md LICENSE CHANGELOG.md || true
-          zip -j "dist/chdtool-${GITHUB_REF_NAME}.zip" chdtool README.md LICENSE CHANGELOG.md || true
+          release_version="${GITHUB_REF_NAME#v}"
+          DIST_DIR="${RUNNER_TEMP}/chdtool-dist" \
+            SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" \
+            bash scripts/package-release.sh "$release_version"
 
       - name: Create GitHub Release and upload assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ github.ref_name }}
           body_path: ${{ steps.cliff_notes.outputs.changelog }}   # file generated above
           files: |
-            dist/*
-            chdtool.sh
+            ${{ runner.temp }}/chdtool-dist/*
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
@@ -57,7 +66,7 @@ jobs:
       # Regenerate the full CHANGELOG.md for main and open a PR
       - name: Regenerate full CHANGELOG.md
         id: cliff_full
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
         with:
           config: cliff.toml
           args: -vv
@@ -66,7 +75,7 @@ jobs:
           GITHUB_REPO: ${{ github.repository }}
 
       - name: Open PR to update CHANGELOG.md on main
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           commit-message: "chore(changelog): update for ${{ github.ref_name }}"
           branch: chore/update-changelog-${{ github.ref_name }}

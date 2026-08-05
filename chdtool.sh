@@ -6,19 +6,37 @@ script_start_time=$(date +%s)
 shopt -s nullglob
 shopt -s extglob
 
-USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] [--dry-run|-n] [--file-tee|-F|--no-file-tee|-N] <input directory>"
+CHDTOOL_VERSION="0.3.0"
+PROGRAM_NAME="$(basename -- "$0")"
+USAGE="Usage: $PROGRAM_NAME [options] [--] <input directory>"
+
+print_usage() {
+  cat <<EOF
+$USAGE
+
+Options:
+  -k, --keep-originals              Do not delete source files
+  -r, --recursive                   Scan subdirectories
+  -n, --dry-run                     Preview operations without changing inputs
+  -a, --allow-unverified-cue-audio  Allow lossy/unverified CUE audio tracks
+  -F, --file-tee                    Enable file mirroring
+  -N, --no-file-tee                 Disable file mirroring
+  -h, --help                        Show this help and exit
+  -V, --version                     Show the version and exit
+EOF
+}
 KEEP_ORIGINALS=false
 RECURSIVE=false
 DRY_RUN=false
+ALLOW_UNVERIFIED_CUE_AUDIO=false
 INPUT_DIR=""
-IS_RAM_DISK=false
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 CHDMAN_MSG_LEVEL="${CHDMAN_MSG_LEVEL:-DEBUG}"
 case "${CHDMAN_MSG_LEVEL^^}" in
   DEBUG|INFO|WARN|ERROR) ;;     # OK
   *) CHDMAN_MSG_LEVEL="INFO" ;; # fallback
 esac
-    
+
 # Manual parsing to support long options
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -28,10 +46,25 @@ while [[ $# -gt 0 ]]; do
             RECURSIVE=true; shift ;;
         --dry-run|-n)
             DRY_RUN=true; shift ;;
+        --allow-unverified-cue-audio|-a)
+            ALLOW_UNVERIFIED_CUE_AUDIO=true; shift ;;
         --file-tee|-F)
             LOG_TEE_FILE=1; shift ;;
         --no-file-tee|-N)
             LOG_TEE_FILE=0; shift ;;
+        --help|-h)
+            print_usage; exit 0 ;;
+        --version|-V)
+            printf '%s %s\n' "$PROGRAM_NAME" "$CHDTOOL_VERSION"; exit 0 ;;
+        --)
+            shift
+            if [[ -n "$INPUT_DIR" || $# -ne 1 ]]; then
+                echo "❌ Expected exactly one input directory after --" >&2
+                echo "$USAGE" >&2; exit 1
+            fi
+            INPUT_DIR="${1%/}"
+            shift
+            break ;;
         -*)
             echo "❌ Unknown option: $1" >&2
             echo "$USAGE" >&2; exit 1 ;;
@@ -49,16 +82,18 @@ done
 if [[ -z "$INPUT_DIR" ]]; then
   echo "$USAGE" >&2; exit 1
 fi
+[[ "$INPUT_DIR" == -* ]] && INPUT_DIR="./$INPUT_DIR"
 if [[ ! -d "$INPUT_DIR" ]]; then
   echo "❌ Input directory does not exist or is not a directory: $INPUT_DIR" >&2
   exit 1
 fi
 
 # Use a disk-based temp directory to avoid filling up RAM
-TMPDIR="/var/tmp/chdtool"
-mkdir -p "$TMPDIR"
+TMP_ROOT="${TMPDIR:-/var/tmp/chdtool}"
+TMPDIR="$TMP_ROOT/$RUN_ID"
+[[ "$DRY_RUN" == true ]] || mkdir -p "$TMPDIR"
 
-LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
+LOGFILE="${LOGFILE:-logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log}"
 
 # --- Pluggable logging: console/file/syslog/journald (auto) -------------------
 # Control via env vars (no root needed to write to journald/syslog):
@@ -110,7 +145,7 @@ if [[ "$LOG_BACKEND" == journald || "$LOG_BACKEND" == syslog ]]; then
 fi
 
 # ensure the logfile directory exists when we might write to it
-if [[ "$LOG_BACKEND" == file || "$LOG_BACKEND" == console ]] || __should_mirror_file; then
+if [[ "$LOG_BACKEND" == file ]] || __should_mirror_file; then
   mkdir -p -- "$(dirname -- "$LOGFILE")"
 fi
 
@@ -179,11 +214,19 @@ _emit_log() {
         __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
         ;;
         console|*)
-        while IFS= read -r line; do
-            printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" | tee -a "$LOGFILE"
-        done <<< "$msg"
+        if __should_mirror_file; then
+            while IFS= read -r line; do
+                printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" | tee -a "$LOGFILE"
+            done <<< "$msg"
+        else
+            __console_print "$ts" "$lvl" "$msg"
+        fi
         ;;
     esac
+
+    # Optional mirrors may legitimately be disabled. Logging still succeeded
+    # when the selected backend accepted the message.
+    return 0
 }
 
 # Public logger. Backwards-compatible: `log "message"` still works.
@@ -200,9 +243,11 @@ log() {
   _emit_log "$lvl" "$*"
 }
 
+log DEBUG "📁 Using temp workspace: $TMPDIR"
 log INFO "🚀 Script started, input dir: $INPUT_DIR"
 [[ "$RECURSIVE" == true ]] && log INFO "📂 Recursive mode enabled — scanning subdirectories"
 [[ "$DRY_RUN" == true ]] && log INFO "🧪 Dry-run mode: no files will be written, moved, or deleted"
+[[ "$ALLOW_UNVERIFIED_CUE_AUDIO" == true ]] && log WARN "⚠️ Allowing unverified/lossy CUE audio tracks — conversion may succeed from non-preservation-grade sources"
 
 is_in_list() {
   local needle="$1"; shift
@@ -211,7 +256,7 @@ is_in_list() {
   return 1
 }
 
-required_commands=(chdman unzip unrar 7z stat awk)
+required_commands=(chdman unzip unrar 7z stat awk stdbuf)
 archive_exts=(zip rar 7z 7zip)
 disc_exts=(iso cue gdi ccd)
 all_exts=("${archive_exts[@]}" "${disc_exts[@]}")
@@ -264,20 +309,15 @@ fi
 # Detect 'createdvd' capability (newer chdman versions)
 CHDMAN_HAS_CREATEDVD=false
 if command -v chdman >/dev/null 2>&1; then
-  set +o pipefail
-  log DEBUG "chdman -help output: $(chdman -help 2>&1)"
-  if chdman -help 2>&1 | grep -qiE 'createdvd'; then
-      log DEBUG "Found 'createdvd' in chdman -help output"
-      CHDMAN_HAS_CREATEDVD=true
-  else
-      log DEBUG "Did NOT find 'createdvd' in chdman -help output"
-      CHDMAN_HAS_CREATEDVD=false
-  fi
-  set -o pipefail
-  log DEBUG "ℹ️ chdman createdvd support: $CHDMAN_HAS_CREATEDVD"
+    if chdman help createdvd >/dev/null 2>&1; then
+        CHDMAN_HAS_CREATEDVD=true
+        log DEBUG "ℹ️ chdman createdvd support: true (via 'chdman help createdvd')"
+    else
+        CHDMAN_HAS_CREATEDVD=false
+        log DEBUG "ℹ️ chdman createdvd support: false (no 'createdvd' help topic)"
+    fi
 else
-  # In dry-run without chdman, just log at DEBUG and keep default false
-  [[ "$DRY_RUN" == true ]] && log DEBUG "ℹ️ chdman not present (dry-run); assuming no createdvd"
+    [[ "$DRY_RUN" == true ]] && log DEBUG "ℹ️ chdman not present (dry-run); assuming no createdvd"
 fi
 
 total_original_size=0
@@ -329,12 +369,177 @@ check_temp_storage() {
         log WARN "⚠️ $tmp_dir is a RAM disk (tmpfs). Extracted ISOs will consume physical RAM!"
         log WARN "💡 Available space in RAM disk: $tmp_limit"
 
-        # Force thread reduction if we are in a RAM disk
-        IS_RAM_DISK=true
     fi
 }
 
-check_temp_storage "$TMPDIR"
+archive_entry_to_chd_name() {
+  # $1 = path inside archive, e.g. "CD1/Game.cue"
+  local entry="$1"
+  local stem="${entry%.*}"
+  # preserve subdir info to avoid collisions, but keep it filename-safe
+  stem="${stem//\// - }"
+  stem="$(sanitize_filename "$stem")"
+  printf '%s.chd' "$stem"
+}
+
+select_preferred_disc_candidates() {
+    local candidates=("$@")
+    local -a cues=() gdis=() ccds=() isos=()
+    local candidate ext
+
+    for candidate in "${candidates[@]}"; do
+        ext="${candidate##*.}"
+        ext="${ext,,}"
+        case "$ext" in
+            cue) cues+=("$candidate") ;;
+            gdi) gdis+=("$candidate") ;;
+            ccd) ccds+=("$candidate") ;;
+            iso) isos+=("$candidate") ;;
+        esac
+    done
+
+    if (( ${#cues[@]} > 0 )); then
+        printf '%s\n' "${cues[@]}"
+    elif (( ${#gdis[@]} > 0 )); then
+        printf '%s\n' "${gdis[@]}"
+    elif (( ${#ccds[@]} > 0 )); then
+        printf '%s\n' "${ccds[@]}"
+    else
+        printf '%s\n' "${isos[@]}"
+    fi
+}
+
+is_safe_relative_path() {
+    local path="${1//\\//}"
+    [[ -n "$path" && "$path" != /* && ! "$path" =~ ^[[:alpha:]]: && "$path" != //* ]] || return 1
+    local part
+    IFS='/' read -r -a _path_parts <<< "$path"
+    for part in "${_path_parts[@]}"; do
+        [[ "$part" != ".." ]] || return 1
+    done
+}
+
+# Resolve each path component independently. This preserves safe subdirectories,
+# permits case-insensitive media layouts, and rejects ambiguous case-fold matches.
+resolve_descriptor_reference() {
+    local base_dir="$1" ref="${2//\\//}" current="$1" part match
+    is_safe_relative_path "$ref" || return 1
+    IFS='/' read -r -a _ref_parts <<< "$ref"
+    for part in "${_ref_parts[@]}"; do
+        [[ -n "$part" && "$part" != "." ]] || continue
+        if [[ -e "$current/$part" ]]; then
+            current="$current/$part"
+            continue
+        fi
+        local -a matches=()
+        while IFS= read -r -d '' match; do matches+=("$match"); done < <(
+            find "$current" -mindepth 1 -maxdepth 1 -iname "$part" -print0 2>/dev/null
+        )
+        (( ${#matches[@]} == 1 )) || return 1
+        current="${matches[0]}"
+    done
+    [[ -f "$current" ]] || return 1
+    printf '%s\n' "$current"
+}
+
+DESCRIPTOR_SOURCE_SET=()
+
+validate_descriptor_file() {
+    local descriptor="$1" ext="${1##*.}" base_dir stem line ref resolved
+    ext="${ext,,}"
+    base_dir="$(dirname "$descriptor")"
+    stem="${descriptor%.*}"
+    DESCRIPTOR_SOURCE_SET=("$descriptor")
+
+    case "$ext" in
+        cue)
+            local unsupported_audio=0
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^[[:space:]]*FILE[[:space:]]+\"([^\"]+)\" ]]; then
+                    ref="${BASH_REMATCH[1]}"
+                    if ! is_safe_relative_path "$ref"; then
+                        log ERROR "❌ Unsafe path in CUE: $ref (required by $descriptor)"
+                        return 1
+                    fi
+                    if ! resolved="$(resolve_descriptor_reference "$base_dir" "$ref")"; then
+                        log ERROR "❌ Missing or ambiguous referenced file in CUE: $ref (required by $descriptor)"
+                        return 1
+                    fi
+                    DESCRIPTOR_SOURCE_SET+=("$resolved")
+                    case "${ref,,}" in
+                        *.mp3|*.ogg|*.opus|*.m4a|*.flac)
+                            if [[ "$ALLOW_UNVERIFIED_CUE_AUDIO" != true ]]; then
+                                log ERROR "❌ CUE references unsupported audio format: $ref"
+                                unsupported_audio=1
+                            fi ;;
+                    esac
+                fi
+            done < "$descriptor"
+            (( unsupported_audio == 0 )) || return 1
+            ;;
+        gdi)
+            local track_count=0
+            while IFS= read -r line; do
+                [[ "$line" =~ ^[[:space:]]*[0-9]+[[:space:]] ]] || continue
+                # GDI track filenames are the fifth field; quoted names may contain spaces.
+                ref="$(awk 'match($0,/^([^[:space:]]+[[:space:]]+){4}("[^"]+"|[^[:space:]]+)/){v=substr($0,RSTART,RLENGTH); sub(/^([^[:space:]]+[[:space:]]+){4}/,"",v); gsub(/^"|"$/,"",v); print v}' <<< "$line")"
+                [[ -n "$ref" ]] || { log ERROR "❌ Invalid GDI track entry: $line"; return 1; }
+                is_safe_relative_path "$ref" || { log ERROR "❌ Unsafe path in GDI: $ref"; return 1; }
+                resolved="$(resolve_descriptor_reference "$base_dir" "$ref")" || { log ERROR "❌ Missing or ambiguous GDI track: $ref"; return 1; }
+                DESCRIPTOR_SOURCE_SET+=("$resolved"); track_count=$((track_count + 1))
+            done < "$descriptor"
+            (( track_count > 0 )) || { log ERROR "❌ GDI contains no valid track entries: $descriptor"; return 1; }
+            ;;
+        ccd)
+            local companion
+            for companion in img sub; do
+                ref="$(basename "$stem").$companion"
+                resolved="$(resolve_descriptor_reference "$base_dir" "$ref")" || { log ERROR "❌ Missing CCD companion file: $ref"; return 1; }
+                DESCRIPTOR_SOURCE_SET+=("$resolved")
+            done
+            ;;
+        *) return 0 ;;
+    esac
+    log DEBUG "✅ Descriptor source-set validation passed: $descriptor"
+}
+
+validate_archive_member_paths() {
+    local member normalized part
+    for member in "$@"; do
+        normalized="${member//\\//}"
+        [[ "$normalized" == */ ]] && normalized="${normalized%/}"
+        [[ -z "$normalized" ]] && continue
+        if ! is_safe_relative_path "$normalized"; then
+            log ERROR "❌ Unsafe archive member path: $member"
+            return 1
+        fi
+    done
+}
+
+validate_archive_output_names() {
+    declare -A seen=()
+    local entry output key
+    for entry in "$@"; do
+        output="$(archive_entry_to_chd_name "$entry")"
+        key="${output,,}"
+        if [[ -n "${seen[$key]:-}" ]]; then
+            log ERROR "❌ Archive entries collide after output-name sanitisation: ${seen[$key]} and $entry -> $output"
+            return 1
+        fi
+        seen["$key"]="$entry"
+    done
+}
+
+validate_extracted_tree() {
+    local root="$1" link target
+    while IFS= read -r -d '' link; do
+        target="$(readlink -- "$link" 2>/dev/null || true)"
+        log ERROR "❌ Unsafe archive link rejected: ${link#"$root/"} -> $target"
+        return 1
+    done < <(find "$root" -type l -print0)
+}
+
+[[ "$DRY_RUN" == true ]] || check_temp_storage "$TMPDIR"
 
 # ---------- chdman progress handling ----------
 # Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
@@ -409,14 +614,16 @@ _now_ms() {
 # Use with: PHASE_DEFAULT="Converting" chdman createcd … | _chdman_progress_filter
 #        or: PHASE_DEFAULT="Verifying"  chdman verify … | _chdman_progress_filter
 _chdman_progress_filter() {
-    # Always re-enable autowrap on exit/interrupt; return non-zero on INT/TERM
+    # Invoked indirectly by the traps below.
+    # shellcheck disable=SC2317
     _restore_wrap() { _term_print "\033[?7h"; }
     trap '_restore_wrap; return 130' INT TERM
     trap _restore_wrap EXIT
 
     local last_draw=0 phase="${PHASE_DEFAULT:-Compressing}" ratio="" progress_active=0 ms
 
-    while IFS= read -d $'\r' -r line || [[ -n "$line" ]]; do
+    # Read from a process-substitution so the while-loop stays in THIS shell
+    while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ "$line" =~ ([0-9]+([.][0-9]+)?)%[[:space:]]*complete ]]; then
             local pct="${BASH_REMATCH[1]}"
             [[ "$line" =~ ^([A-Za-z]+), ]] && phase="${BASH_REMATCH[1]}"
@@ -431,16 +638,14 @@ _chdman_progress_filter() {
             continue
         fi
 
-        # Ignore obvious chopped progress fragments
         if [[ "$line" =~ ^[[:space:]]*([A-Za-z]+,)?[[:space:]]*$ ]] || \
-            [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
+           [[ "$line" =~ ^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$ ]]; then
             continue
         fi
 
         log "$CHDMAN_MSG_LEVEL" "$line"
-    done
+    done < <(tr $'\r' $'\n' <&0)   # CR → NL normalisation happens here
 
-    # At EOF: end the progress line neatly with a single newline
     (( progress_active )) && _term_print "\r\033[2K\n"
 }
 
@@ -502,14 +707,13 @@ parse_disc_info() {
     # Pattern set 1: Disc/CD/Disk/GD(-ROM)? with optional separator or none:
     # e.g., "Title Disc2", "Title (CD-2)", "Title [Disk02]", "Title GD-ROM 3", "Title Disc 01"
     # ERE (bash) has no (?: ). Keep groups simple and predictable.
-    local re_core='([Dd]isc|[Cc][Dd]|[Dd]isk|[Gg][Dd]|[Gg][Dd]-[Rr][Oo][Mm])'
+    local re_disc_labels='([Dd]isc|[Cc][Dd]|[Dd]isk|[Gg][Dd]|[Gg][Dd]-[Rr][Oo][Mm])'
     local re_num='([0-9]{1,3})'
     local re_sep='[[:space:]]*[-_.]?[[:space:]]*'
     # For the compact/union pattern, keep it a single capturing group:
-    local re_label_union='([Dd]isc|[Cc][Dd]|[Dd]isk|[Gg][Dd]|[Gg][Dd]-[Rr][Oo][Mm]|[Vv]ol|[Vv]olume|[Pp]art|[Pp]t\.?)'
+    local re_label_union="(${re_disc_labels:1:-1}|[Vv]ol|[Vv]olume|[Pp]art|[Pp]t\\.?)"
 
-
-    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?$re_core$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
+    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?$re_disc_labels$re_sep$re_num\)?([[:space:]]*.*)?$ ]]; then
         local base="${BASH_REMATCH[1]}"
         local num="${BASH_REMATCH[3]}"   # (1=label,2=sep? depends on grouping; ensure index)
         # Because of our grouping above, indexes are:
@@ -536,7 +740,7 @@ parse_disc_info() {
     fi
 
     # Pattern set 4: "1 of 2" / "1/2"
-    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([0-9]+)[[:space:]]*(?:of|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$ ]]; then
+    if [[ "$name_norm" =~ ^(.*?)[[:space:]._-]*\(?([0-9]+)[[:space:]]*([Oo][Ff]|/)[[:space:]]*[0-9]+\)?([[:space:]]*.*)?$ ]]; then
         local base="${BASH_REMATCH[1]}"
         local num="${BASH_REMATCH[2]}"
         base="$(tidy_base "$base")"
@@ -652,6 +856,7 @@ generate_m3u_for_base() {
         log INFO "🧪 (dry-run) Would (re)write M3U: $m3u_path with ${#members[@]} lines"
     else
         local tmp_m3u="$m3u_path.tmp"
+        track_temp_file "$tmp_m3u"
         : > "$tmp_m3u"
         for f in "${members[@]}"; do
             printf '%s\n' "$(basename "$f")" >> "$tmp_m3u"
@@ -695,39 +900,67 @@ maybe_generate_m3u_for() {
 # --- Global interrupt + cleanup handling --------------------------------------
 # Track temp dirs created during processing so we can clean them on SIGINT/TERM
 declare -a TEMP_DIRS=()
+declare -a TEMP_FILES=()
 
+track_temp_dir()  { TEMP_DIRS+=("$1"); }
+track_temp_file() { TEMP_FILES+=("$1"); }
+
+untrack_temp_file() {
+  local f="$1" i
+  for i in "${!TEMP_FILES[@]}"; do
+    [[ "${TEMP_FILES[$i]}" == "$f" ]] && unset 'TEMP_FILES[$i]'
+  done
+}
+
+cleanup_temp_file_now() {
+  local f="$1"
+  if [[ -n "$f" && -f "$f" ]]; then
+    rm -f -- "$f"
+    log INFO "🗑️ Removed temp file: $f"
+  fi
+  untrack_temp_file "$f"
+}
+
+cleanup_temp_dir_now() {
+  local d="$1"
+  [[ -n "$d" && -d "$d" ]] || return 0
+  rm -rf -- "$d"
+  log INFO "🧹 Cleaned up temp dir: $d"
+  # remove it from TEMP_DIRS so cleanup_all won't log it again
+  local i
+  for i in "${!TEMP_DIRS[@]}"; do
+    [[ "${TEMP_DIRS[$i]}" == "$d" ]] && unset 'TEMP_DIRS[$i]'
+  done
+}
+
+# Invoked indirectly through _on_interrupt's signal trap.
+# shellcheck disable=SC2317
 _restore_wrap_global() {
   # Make sure terminal autowrap is re-enabled and the progress line cleared
   # (safe to emit even if no progress was showing)
   _term_print "\r\033[2K\033[?7h\n"
 }
 
+# Invoked indirectly by the EXIT trap and the signal handler.
+# shellcheck disable=SC2317
 cleanup_all() {
-  # Remove any temp dirs that might still exist
-  if ((${#TEMP_DIRS[@]})); then
-    for d in "${TEMP_DIRS[@]}"; do
-      if [[ -n "$d" && -d "$d" ]]; then
+    # Temp dirs
+    for d in "${TEMP_DIRS[@]:-}"; do
+        [[ -n "$d" && -d "$d" ]] || continue
         rm -rf -- "$d"
         log INFO "🧹 Cleaned up temp dir: $d"
-      fi
     done
-  fi
 
-  # Remove our known temp files in the working directory tree
-  if [[ -n "$INPUT_DIR" && -d "$INPUT_DIR" ]]; then
-    while IFS= read -r -d '' f; do
-      rm -f -- "$f"
-      log INFO "🗑️ Removed leftover tmp file: $f"
-    done < <(find "$INPUT_DIR" -type f \( -name '*.chd.tmp' -o -name '*.m3u.tmp' \) -print0)
-  fi
-
-  # Remove verify scratch files in the new temp directory
-  while IFS= read -r -d '' f; do
-    rm -f -- "$f"
-    log INFO "🗑️ Removed verify scratch: $f"
-  done < <(find "$TMPDIR" -maxdepth 1 -type f -name 'chdverify_*' -print0 2>/dev/null || true)
+    # Temp files
+    for f in "${TEMP_FILES[@]:-}"; do
+        [[ -n "$f" && -f "$f" ]] || continue
+        rm -f -- "$f"
+        log INFO "🗑️ Removed temp file: $f"
+    done
 }
 
+# Invoked indirectly by the INT and TERM traps.
+# shellcheck disable=SC2317
 _on_interrupt() {
   # One place to handle Ctrl-C/TERM: restore terminal, clean, then exit(130)
   _restore_wrap_global
@@ -748,13 +981,15 @@ verify_chds() {
 
     if [[ "$DRY_RUN" == true ]]; then
         for chd in "${chds[@]}"; do
-            log INFO "🧪 (dry-run) Would verify: $outdir/$chd"
+            [[ -n "$outdir" ]] && chd="$outdir/$chd"
+            log INFO "🧪 (dry-run) Would verify: $chd"
         done
         return 0
     fi
 
     for chd in "${chds[@]}"; do
-        local chd_path="$outdir/$chd"
+        local chd_path="$chd"
+        [[ -n "$outdir" ]] && chd_path="$outdir/$chd"
         if [[ ! -f "$chd_path" ]]; then
             all_verified=false
             break
@@ -763,11 +998,12 @@ verify_chds() {
         local verify_exit_code=0
         local tmpout
         tmpout="$(mktemp -p "$TMPDIR" chdverify_XXXXXX)"
+        track_temp_file "$tmpout"
 
         log INFO "🔎 Verifying: $chd_path"
         if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
             # TTY: show single-line progress, capture full output to tmp for analysis
-            if PHASE_DEFAULT="Verifying" "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 \
+            if PHASE_DEFAULT="Verifying" stdbuf -oL -eL "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 \
                 | tee "$tmpout" \
                 | _chdman_progress_filter
             then
@@ -799,7 +1035,7 @@ verify_chds() {
             : > "$tmpout"
             log INFO "🔎 Verifying: $chd_path"
             if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-                if PHASE_DEFAULT="Verifying" "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 \
+                if PHASE_DEFAULT="Verifying" stdbuf -oL -eL "${CHDMAN_BIN:-chdman}" verify -i "$chd_path" 2>&1 \
                     | tee "$tmpout" \
                     | _chdman_progress_filter
                 then
@@ -819,7 +1055,6 @@ verify_chds() {
             # Still failed: log concise reasons and clean up
             failure_reasons="$(grep -iE 'error|fail|invalid|corrupt' "$tmpout" || true)"
             [[ -n "$failure_reasons" ]] && log DEBUG "   Failure details: $failure_reasons"
-            failures=$((failures + 1))
             log ERROR "❌ Verification failed on retry for: $chd_path — deleting"
             rm -f -- "$chd_path"
             rm -f -- "$tmpout"
@@ -834,70 +1069,81 @@ verify_chds() {
     $all_verified && return 0 || return 1
 }
 
-validate_cue_file() {
-    local cue_file="$1"
-    local cuedir
-    cuedir="$(dirname "$cue_file")"
-    local cue_basename
-    cue_basename="$(basename "$cue_file")"
-    local missing=0
-
-    declare -A file_map
-    while IFS= read -r -d '' f; do
-    file_map["${f,,}"]="$f"
-    done < <(find "$cuedir" -maxdepth 1 -type f -printf '%f\0')
-
-    while IFS= read -r line; do
-        if [[ "$line" =~ ^[[:space:]]*FILE[[:space:]]+\"([^\"]+)\" ]]; then
-            local ref="${BASH_REMATCH[1]}"
-            local ref_norm="${ref//\\//}"
-            local ref_basename; ref_basename="$(basename "$ref_norm")"
-            local ref_lower="${ref_basename,,}"
-
-            [[ "$ref_lower" == "${cue_basename,,}" ]] && continue
-
-            if [[ "$ref_lower" == *.mp3 || "$ref_lower" == *.wav ]]; then
-                log WARN "⚠️ CUE file references unsupported audio format: $ref_basename"
-            fi
-            if [[ "$ref_norm" == /* || "$ref_norm" == *".."* ]]; then
-                log WARN "⚠️ Skipping unsafe external path in CUE: $ref_basename"
-                continue
-            fi
-            if [[ -z "${file_map["$ref_lower"]:-}" ]]; then
-                log ERROR "❌ Missing referenced file in CUE: $ref_basename (required by $cue_file)"
-                missing=1
-            fi
-        fi
-    done < "$cue_file"
-
-    return $missing
-}
-
 detect_disc_type() {
+    log DEBUG "DEBUG: Starting detection for: $1"
     local img="$1"
     local ext
     ext="${img##*.}"; ext="${ext,,}"
     local sz
     sz=$(get_file_size "$img" 2>/dev/null || echo 0)
-    
+    # --- DEBUGGING ---
+    log DEBUG "sz value for $(basename "$img"): [${sz}]"
+    # -----------------
+
     #1. Size-based "hard limits"
     # If it's > 1GB, it's a DVD/PS2 regardless of what the header says (some PS2 games have weird headers that look like CDs)
     local is_large_disc=false
     (( sz >= 1000000000 )) && is_large_disc=true
+    # --- DEBUGGING ---
+    log DEBUG "is_large_disc for $(basename "$img"): $is_large_disc (size: $sz bytes)"
+    # -----------------
 
-    #2. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
-    case "$ext" in
-        cue|ccd|gdi) echo "cd"; return 0 ;;
-    esac
+    # Sniff the header before checking extensions
+    local sniff_target="$img"
+    if [[ "$ext" == "cue" ]]; then
+        local cue_dir
+        cue_dir="$(dirname "$img")"
 
-    #3. Console Fingerprinting
+        # Prefer a likely DATA file (BIN/ISO/IMG/MDF) over audio tracks.
+        local raw_ref=""
+        raw_ref="$(
+            awk -F'"' '
+                BEGIN { IGNORECASE=1 }
+                /^[[:space:]]*FILE[[:space:]]+"/ {
+                    ref=$2
+                    low=tolower(ref)
+                    gsub(/\\/, "/", low)
+                    # pick first "data-ish" file
+                    if (low ~ /\.(bin|iso|img|mdf)$/) { print ref; selected=1; exit }
+                    # otherwise remember first FILE as fallback
+                    if (first == "") first = ref
+                }
+                END { if (!selected && first != "") print first }
+            ' "$img"
+        )"
+
+        # Normalize Windows path separators
+        raw_ref="${raw_ref//\\//}"
+
+        local sniff_candidate=""
+        sniff_candidate="$(resolve_descriptor_reference "$cue_dir" "$raw_ref" 2>/dev/null || true)"
+
+        log DEBUG "DEBUG: CUE selected sniff candidate: [$raw_ref]"
+        log DEBUG "DEBUG: Full resolved sniff path:     [$sniff_candidate]"
+
+        if [[ -n "$raw_ref" && -f "$sniff_candidate" ]]; then
+            log DEBUG "DEBUG: Found referenced file. Switching sniff_target."
+            sniff_target="$sniff_candidate"
+        else
+            log DEBUG "DEBUG: FAILED to resolve referenced file from CUE."
+            log DEBUG "DEBUG: Directory contents of $cue_dir: $(ls -m "$cue_dir")"
+        fi
+    fi
+
+    #2. Console Fingerprinting
     # Reading the first 64KB covers Volume Descriptors and Boot Headers
     local header
-    header=$(head -c 65535 "$img" 2>/dev/null | tr -d '\0')
+    header="$(head -c 65535 -- "$sniff_target" 2>/dev/null | tr -d '\0' || true)"
+
+    # Check for PS2 specifically in debug
+    if [[ "$header" == *"PLAYSTATION 2"* ]]; then
+        log DEBUG "DEBUG: 'PLAYSTATION 2' string found in header of $(basename "$sniff_target")"
+    fi
+    # ------------------------------------------
 
     case "$header" in
         *"PLAYSTATION 2"*|*"NTSC-U/C PS2 DVD"*) echo "ps2"; return 0 ;;
-        *"PLAYSTATION "*|*"NTSC-U/C PS1 CD"*)
+        *"PLAYSTATION  "*|*"NTSC-U/C PS1 CD"*)
             # If it says PS1 but it's >1GB, it's a mislabeled PS2 DVD
             if [[ "$is_large_disc" == true ]]; then
                 log WARN "⚠️ Header indicates PS1 but size suggests PS2 DVD. Treating as PS2: $img"
@@ -910,6 +1156,11 @@ detect_disc_type() {
         *"SEGA SEGAKATANA"*) echo "dreamcast"; return 0 ;;
         *"SEGA SEGASATURN"*) echo "saturn"; return 0 ;;
         *"PSP GAME"*|*"UMD VIDEO"*) echo "psp"; return 0 ;;
+    esac
+
+    #3. Immediate CD extensions - CUE/CCD/GDI are CD-type by definition
+    case "$ext" in
+        cue|ccd|gdi) echo "cd"; return 0 ;;
     esac
 
     #4. UDF/ISO logic fallback
@@ -926,35 +1177,37 @@ detect_disc_type() {
         fi
 
         # Size heuristic: ≥ ~1 GB → likely DVD; otherwise CD
-        local sz
-        sz=$(get_file_size "$img")
-        (( sz >= 1000000000 )) && { echo "dvd"; return 0; }
+        [[ "$is_large_disc" == true ]] && { echo "dvd"; return 0; }
     fi
 
-    # Unknown extension → default to CD (safe for createcd)
-    if [[ "$is_large_disc" == true ]]; then
-        echo "dvd"; return 0
-    else
-        echo "cd"; return 0
-    fi
+    #5 Final fallback: Unknown extension → default to CD (safe for createcd)
+    [[ "$is_large_disc" == true ]] && echo "dvd" || echo "cd"
 }
 
 convert_disc_file() {
     local file="$1"
     local outdir="$2"
+    local base_override="${3:-}"
+    local result_var="${4:-}"
 
-    # If it's a CUE, validate referenced files first
-    if [[ "${file,,}" == *.cue ]]; then
-        if ! validate_cue_file "$file"; then
-            log ERROR "❌ Missing referenced file in CUE: $file"
+    [[ -n "$result_var" ]] && printf -v "$result_var" '%s' ""
+
+    local file_ext="${file##*.}"; file_ext="${file_ext,,}"
+    if [[ "$file_ext" == "cue" || "$file_ext" == "gdi" || "$file_ext" == "ccd" ]]; then
+        if ! validate_descriptor_file "$file"; then
+            log ERROR "❌ Descriptor validation failed: $file"
             return 1
         fi
     fi
 
     local base
-    base="$(get_chd_basename "$file")"
+    if [[ -n "$base_override" ]]; then
+        base="$base_override"
+    else
+        base="$(get_chd_basename "$file")"
+    fi
+
     local chd_path="$outdir/$base.chd"
-    local tmp_chd="$outdir/$base.chd.tmp"
 
     # If a CHD already exists, verify it and skip if good
     if [[ -f "$chd_path" ]]; then
@@ -963,7 +1216,6 @@ convert_disc_file() {
             log INFO "✅ Existing CHD verified, skipping conversion: $chd_path"
             return 0
         else
-            failures=$((failures + 1))
             log WARN "❌ Existing CHD verification failed, will convert and replace"
         fi
     fi
@@ -971,90 +1223,134 @@ convert_disc_file() {
     # Decide CD vs DVD and pick subcommand + icon
     local disc_type
     disc_type="$(detect_disc_type "$file")"
-    local hunk_size=2448 #Default
-
     local subcmd icon
     case "$disc_type" in
-        ps2|psp|dvd)
+        ps2)
+            log DEBUG "PS2 image detected, checking size to determine if DVD structure is likely"
+            local sz
+            sz=$(get_file_size "$file")
+            if (( sz >= 1000000000 )); then
+                log DEBUG "Large PS2 image suggests DVD structure, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
+                if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
+                    log DEBUG "Using createdvd for large PS2 image"
+                    subcmd="createdvd"
+                    icon="📀"
+                else
+                    log WARN "⚠️ PS2 DVD detected but chdman lacks 'createdvd'. Skipping $file."
+                    return 1
+                fi
+            else
+                log DEBUG "Smaller PS2 image suggests CD structure, using createcd"
+                subcmd="createcd"
+                icon="💿"
+            fi
+            ;;
+        psp|dvd)
             log DEBUG "DVD detected, CHDMAN_HAS_CREATEDVD=$CHDMAN_HAS_CREATEDVD"
             if [[ "$CHDMAN_HAS_CREATEDVD" == true ]]; then
                 subcmd="createdvd"
-                hunk_size=2048 # DVD-ROM and PS2/PSP discs use standard 2K data sectors
                 icon="📀"
             else
                 log WARN "⚠️ Detected DVD image but this chdman lacks 'createdvd'. Skipping: $file"
-                failures=$((failures + 1))
                 return 1
             fi
             ;;
         ps1|dreamcast|segacd|saturn|cd)
+            log DEBUG "CD-type image detected, using createcd"
             subcmd="createcd"
-            hunk_size=2448 # CD-ROMs use 2352-byte raw sectors but chdman createcd expects 2448 to include subchannel data for full disc preservation
             icon="💿"
             ;;
         *)
             log WARN "⚠️ Unknown disc type detected, defaulting to CD settings: $file"
             subcmd="createcd"
-            hunk_size=2448
             icon="💿"
             ;;
     esac
 
     log INFO "$icon Detected $disc_type image → using chdman $subcmd"
-    log INFO "🔧 Converting: $file -> $tmp_chd"
 
-    # Calculate safe threads: ~one thread per 2GB RAM (for CDs) or 4GB RAM (for DVDs)
-    local total_ram_mb=$(( $(awk '/MemTotal|SwapTotal/{sum+=$2} END{print sum}' /proc/meminfo) / 1024 ))
-    local available_ram=$total_ram_mb
-
-    if [[ "$IS_RAM_DISK" == true ]]; then
-        local iso_size_mb=$(( $(stat -c%s "$file") / 1048576 ))
-        (( available_ram = total_ram_mb - iso_size_mb))
-        log DEBUG "📉 RAM disk detected. Adjusting available RAM for chdman to ${available_ram}MB"
-    fi
-
+    # Base concurrency on currently available physical memory. Swap is not
+    # interchangeable with RAM for compression and can cause severe thrashing.
+    local available_ram
+    available_ram=$(( $(awk '/^MemAvailable:/{print $2; found=1} END{if(!found) print 0}' /proc/meminfo 2>/dev/null) / 1024 ))
+    (( available_ram < 1 )) && available_ram=1024
     local cpu_cores
-    cpu_cores=$(nproc)
+    cpu_cores=$(nproc 2>/dev/null || echo 1)
+    (( cpu_cores < 1 )) && cpu_cores=1
     local ram_per_thread=2048   # Default for CDs
 
     if [[ "$subcmd" == "createdvd" ]]; then
         ram_per_thread=4096  # 4GB floor for DVDs (LZMA is a beast here)
     fi
 
-    # Calculate threads based on RAM (aiming for ~3GB per thread)
+    # Calculate threads from available RAM, then apply the explicit override.
     local threads=$(( available_ram / ram_per_thread ))
     (( threads < 1 )) && threads=1
     (( threads > cpu_cores )) && threads=$cpu_cores
+    if [[ -n "${CHDMAN_THREADS:-}" ]]; then
+        [[ "$CHDMAN_THREADS" =~ ^[1-9][0-9]*$ ]] || { log ERROR "❌ CHDMAN_THREADS must be a positive integer"; return 1; }
+        threads="$CHDMAN_THREADS"
+        (( threads > cpu_cores )) && threads=$cpu_cores
+    fi
+
+    local -a chdman_args=("$subcmd" -np "$threads")
+    if [[ -n "${CHDMAN_HUNK_SIZE:-}" ]]; then
+        [[ "$CHDMAN_HUNK_SIZE" =~ ^[1-9][0-9]*$ ]] || { log ERROR "❌ CHDMAN_HUNK_SIZE must be a positive integer"; return 1; }
+        chdman_args+=(-hs "$CHDMAN_HUNK_SIZE")
+    fi
+    chdman_args+=(-i "$file")
 
     if [[ "$DRY_RUN" == true ]]; then
-        log INFO "🧪 (dry-run) Would run: ${CHDMAN_BIN:-chdman} $subcmd -np $threads -i \"$file\" -o \"$tmp_chd\""
+        local command_preview
+        printf -v command_preview '%q ' "${CHDMAN_BIN:-chdman}" "${chdman_args[@]}" -o "<unique temporary CHD beside $chd_path>"
+        log INFO "🧪 (dry-run) Would run: ${command_preview% }"
         return 0
     fi
 
+    # Reserve a unique location in the destination filesystem. Keeping the
+    # reservation directory until finalisation prevents concurrent runs from
+    # ever allocating or writing the same temporary path.
+    local tmp_dir tmp_chd
+    tmp_dir="$(mktemp -d -p "$outdir" ".${base}.chd.tmp.${RUN_ID}.XXXXXX")" || {
+        log ERROR "❌ Could not allocate temporary CHD path for: $chd_path"
+        return 1
+    }
+    track_temp_dir "$tmp_dir"
+    tmp_chd="$tmp_dir/$base.chd"
+    track_temp_file "$tmp_chd"
+    [[ -n "$result_var" ]] && printf -v "$result_var" '%s' "$tmp_chd"
+    log INFO "🔧 Converting: $file -> $tmp_chd"
+    local -a command=("${CHDMAN_BIN:-chdman}" "${chdman_args[@]}" -o "$tmp_chd")
+
     if [[ -t 2 && "${PROGRESS_STYLE:-$PROGRESS_STYLE_DEFAULT}" != "none" ]]; then
-    if ! PHASE_DEFAULT="Converting" stdbuf -oL -eL "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd" 2>&1 | _chdman_progress_filter; then
+        if ! PHASE_DEFAULT="Converting" stdbuf -oL -eL "${command[@]}" 2>&1 | _chdman_progress_filter; then
             log ERROR "❌ chdman $subcmd failed for: $file"
+            cleanup_temp_file_now "$tmp_chd"
+            cleanup_temp_dir_now "$tmp_dir"
             return 1
         fi
     else
-        if ! "${CHDMAN_BIN:-chdman}" "$subcmd" -np "$threads" -hs "$hunk_size" -i "$file" -o "$tmp_chd"; then
+        if ! "${command[@]}"; then
             log ERROR "❌ chdman $subcmd failed for: $file"
+            cleanup_temp_file_now "$tmp_chd"
+            cleanup_temp_dir_now "$tmp_dir"
             return 1
         fi
     fi
 
-    sync
-    sleep 1
     return 0
 }
 
 process_input() {
+    local input_failed=false
     local input_file="$1"
     local ext="${input_file##*.}"; ext="${ext,,}"
     local outdir
     outdir="$(dirname "$input_file")"
-
     local archive_entries=()
+    local archive_all_entries=()
+    local archive_listing=""
+    local archive_listing_exit=0
     local disc_files=()
     local expected_chds=()
     local archive_size_bytes
@@ -1062,26 +1358,99 @@ process_input() {
     local ext_regex
     ext_regex="$(build_ext_regex "${disc_exts[@]}")"
     local temp_dir=""
+    declare -A output_states=()
+    declare -A output_temps=()
+    local direct_source_set=()
 
-    _cleanup() {
-    if [[ -n "$temp_dir" && -d "$temp_dir" ]]; then
-        rm -rf -- "$temp_dir"
-        log INFO "🧹 Cleaned up temp dir: $temp_dir"
-    fi
+    _all_outputs_complete() {
+        local expected state
+        for expected in "${expected_chds[@]}"; do
+            state="${output_states[$expected]:-missing}"
+            [[ "$state" == "already_verified" || "$state" == "finalised" ]] || return 1
+        done
+        return 0
     }
-    # One-shot traps: cleanup on normal return and on error; clear both on return.
-    trap '_cleanup; trap - RETURN; trap - ERR' RETURN ERR
+
+    _return_failed_input() {
+        failures=$((failures + 1))
+        return 1
+    }
+
+    _remove_input_if_allowed() {
+        if [[ "$KEEP_ORIGINALS" == true ]]; then
+            log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
+            return 0
+        fi
+
+        if [[ "$DRY_RUN" == true ]]; then
+            log INFO "🧪 (dry-run) Would remove original input file: $input_file"
+            return 0
+        fi
+
+        if (( ${#direct_source_set[@]} > 0 )); then
+            local source
+            for source in "${direct_source_set[@]}"; do
+                log INFO "🗑️ Removing validated descriptor source: $source"
+                rm -f -- "$source"
+            done
+        else
+            log INFO "🗑️ Removing original input file: $input_file"
+            rm -f -- "$input_file"
+        fi
+    }
 
     if is_in_list "$ext" "${archive_exts[@]}"; then
         archives_processed=$((archives_processed + 1))
         case "$ext" in
-            zip) mapfile -t archive_entries < <(unzip -Z1 "$input_file" | grep -Ei "$ext_regex") ;;
-            rar) mapfile -t archive_entries < <(unrar lb "$input_file" | grep -Ei "$ext_regex") ;;
-            7z|7zip) mapfile -t archive_entries < <(7z l -ba "$input_file" | grep -Ei "$ext_regex") ;;
+            zip)
+                if archive_listing="$(unzip -Z1 -- "$input_file")"; then :; else archive_listing_exit=$?; fi
+                ;;
+            rar)
+                if archive_listing="$(unrar lb -- "$input_file")"; then :; else archive_listing_exit=$?; fi
+                ;;
+            7z|7zip)
+                if archive_listing="$(7z l -slt -- "$input_file")"; then :; else archive_listing_exit=$?; fi
+                ;;
         esac
-        for entry in "${archive_entries[@]}"; do
-            expected_chds+=("$(get_chd_basename "$entry").chd")
-        done
+
+        if [[ $archive_listing_exit -ne 0 ]]; then
+            log ERROR "❌ Archive listing failed for $input_file (Exit code: $archive_listing_exit). Skipping."
+            _return_failed_input
+            return 1
+        fi
+
+        case "$ext" in
+            zip|rar) mapfile -t archive_all_entries <<< "$archive_listing" ;;
+            # The first Path field describes the archive itself. Member records
+            # begin after the separator in 7z's technical listing.
+            7z|7zip) mapfile -t archive_all_entries < <(awk 'seen && /^Path = /{print substr($0,8)} /^----------$/{seen=1}' <<< "$archive_listing") ;;
+        esac
+        if ! validate_archive_member_paths "${archive_all_entries[@]}"; then
+            log ERROR "❌ Archive path preflight failed: $input_file"
+            _return_failed_input
+            return 1
+        fi
+
+        case "$ext" in
+            zip|rar) mapfile -t archive_entries < <(grep -Ei "$ext_regex" <<< "$archive_listing" || true) ;;
+            7z|7zip) mapfile -t archive_entries < <(awk -v IGNORECASE=1 -v re="$ext_regex" 'seen && /^Path = /{p=substr($0,8); if(p~re) print p} /^----------$/{seen=1}' <<< "$archive_listing") ;;
+        esac
+
+        if [[ ${#archive_entries[@]} -gt 0 ]]; then
+            mapfile -t archive_entries < <(select_preferred_disc_candidates "${archive_entries[@]}")
+            if ! validate_archive_output_names "${archive_entries[@]}"; then
+                _return_failed_input
+                return 1
+            fi
+            log DEBUG "📀 Selected ${#archive_entries[@]} preferred disc descriptor(s) from archive: $(basename "$input_file")"
+            for entry in "${archive_entries[@]}"; do
+                local expected_chd
+                expected_chd="$(archive_entry_to_chd_name "$entry")"
+                log DEBUG "   Selected archive entry: $entry"
+                log DEBUG "   Expected CHD: $expected_chd"
+                expected_chds+=("$expected_chd")
+            done
+        fi
     fi
 
     if is_in_list "$ext" "${disc_exts[@]}"; then
@@ -1094,26 +1463,42 @@ process_input() {
         return 0
     fi
 
-    # If all expected CHDs already exist and verify, remove original and done
-    if verify_chds "$outdir" "${expected_chds[@]}"; then
-        log INFO "✅ All expected CHDs verified for $input_file"
-        if [[ "$KEEP_ORIGINALS" != true ]]; then
-            if [[ "$DRY_RUN" == true ]]; then
-                log INFO "🧪 (dry-run) Would remove original input file: $input_file"
-            else
-                log INFO "🗑️ Removing original input file: $input_file"
-                rm -f -- "$input_file"
-            fi
+    # Direct descriptors own a complete validated source set. On success, all
+    # members are removed together; on any failure, every source is retained.
+    if [[ "$ext" == "cue" || "$ext" == "gdi" || "$ext" == "ccd" ]]; then
+        if ! validate_descriptor_file "$input_file"; then
+            log ERROR "❌ Descriptor validation failed (input considered failed): $input_file"
+            input_failed=true
         else
-            log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
+            direct_source_set=("${DESCRIPTOR_SOURCE_SET[@]}")
         fi
-        # Per-iteration M3U generation for already-present sets
+    fi
+    if [[ "$input_failed" == true ]]; then
+        _return_failed_input
+        return 1
+    fi
+
+    # Establish one authoritative state for every expected output.
+    local expected_chd
+    for expected_chd in "${expected_chds[@]}"; do
+        if [[ -f "$outdir/$expected_chd" ]] && verify_chds "$outdir" "$expected_chd"; then
+            output_states["$expected_chd"]="already_verified"
+        else
+            output_states["$expected_chd"]="missing"
+        fi
+    done
+
+    # If all expected CHDs already exist and verify, generate the complete-set
+    # playlist before treating source removal as the final action.
+    if [[ "$input_failed" != true ]] && _all_outputs_complete; then
+        log INFO "✅ All expected CHDs verified for $input_file"
         if [[ ${#expected_chds[@]} -gt 0 ]]; then
             local chd_base
             chd_base="$(basename "${expected_chds[0]}" .chd)"
             log DEBUG "🔤 Raw base name: $chd_base"
             maybe_generate_m3u_for "$chd_base" "$outdir"
         fi
+        _remove_input_if_allowed
         return 0
     fi
 
@@ -1127,25 +1512,55 @@ process_input() {
             # But keep expected_chds populated from archive listing (already done above).
         else
             temp_dir="$(mktemp -d -p "$TMPDIR" "chdconv_$(basename "$input_file" ".${ext}")_XXXX")"
+            track_temp_dir "$temp_dir"
             log INFO "📦 Extracting $input_file to $temp_dir"
-            TEMP_DIRS+=("$temp_dir")
+            local extraction_exit=0
             case "$ext" in
-                zip) unzip -qq "$input_file" -d "$temp_dir" ;;
-                rar) unrar x -o+ "$input_file" "$temp_dir" >/dev/null ;;
-                7z|7zip) 7z x -y -o"$temp_dir" "$input_file" >/dev/null ;;
+                zip)
+                    unzip -qq "$input_file" -d "$temp_dir"
+                    extraction_exit=$?
+                    ;;
+                rar)
+                    unrar x -o+ "$input_file" "$temp_dir" >/dev/null
+                    extraction_exit=$?
+                    ;;
+                7z|7zip)
+                    7z x -y -o"$temp_dir" "$input_file" >/dev/null
+                    extraction_exit=$?
+                    ;;
             esac
 
-            log DEBUG "🧹 Flushing extraction buffers to free up RAM..."
-            sync
+            # Strict validation: Abort if the extraction tool retrned an error code, which likely means the archive is corrupted or password-protected.
+            if [[ $extraction_exit -ne 0 ]]; then
+                log ERROR "❌ Extraction failed for $input_file (Exit code: $extraction_exit). Skipping."
+                input_failed=true
+                cleanup_temp_dir_now "$temp_dir"
+                _return_failed_input
+                return 1
+            fi
+
+            if ! validate_extracted_tree "$temp_dir"; then
+                input_failed=true
+                cleanup_temp_dir_now "$temp_dir"
+                _return_failed_input
+                return 1
+            fi
 
             read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
             mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
 
-            if [[ ${#disc_files[@]} -eq 0 && ${#archive_entries[@]} -gt 0 ]]; then
+            if [[ ${#disc_files[@]} -gt 0 ]]; then
+                mapfile -t disc_files < <(select_preferred_disc_candidates "${disc_files[@]}")
+                log DEBUG "📀 Selected ${#disc_files[@]} preferred extracted disc file(s) from: $temp_dir"
+                for disc in "${disc_files[@]}"; do
+                    log DEBUG "   Selected extracted file: $disc"
+                done
+            elif [[ ${#archive_entries[@]} -gt 0 ]]; then
                 for entry in "${archive_entries[@]}"; do
                     local full_path="$temp_dir/$entry"
                     [[ -f "$full_path" ]] && disc_files+=("$full_path")
                 done
+                log DEBUG "📀 Falling back to archive-selected extracted entries: ${#disc_files[@]}"
             fi
         fi
 
@@ -1153,80 +1568,145 @@ process_input() {
         if [[ "$DRY_RUN" == true && ${#archive_entries[@]} -gt 0 ]]; then
             for entry in "${archive_entries[@]}"; do
                 # Mirror the naming used later: basename without extension + .chd
-                log INFO "🧪 (dry-run) Would convert: $entry -> $outdir/$(basename "${entry%.*}").chd"
+                log INFO "🧪 (dry-run) Would convert: $entry -> $outdir/$(archive_entry_to_chd_name "$entry")"
             done
         fi
     fi
 
     local archive_chd_size=0
     local tmp_chds=()
+    local final_chds=()
 
     if [[ "$DRY_RUN" == true ]]; then
         for disc in "${disc_files[@]}"; do
-            log INFO "🧪 (dry-run) Would convert: $disc -> $outdir/$(basename "${disc%.*}").chd"
+            convert_disc_file "$disc" "$outdir" || input_failed=true
         done
-    else
-        for disc in "${disc_files[@]}"; do
-            if convert_disc_file "$disc" "$outdir"; then
-                tmp_chds+=("$outdir/$(basename "${disc%.*}").chd.tmp")
+
+        # Dry-run: also show M3U intent (if this looks like a multi-disc set)
+        if [[ ${#expected_chds[@]} -gt 0 ]]; then
+            local chd_base
+            chd_base="$(basename "${expected_chds[0]}" .chd)"
+            maybe_generate_m3u_for "$chd_base" "$outdir"
+        fi
+        
+        [[ "$input_failed" == true ]] && { _return_failed_input; return 1; }
+        return 0
+    fi
+
+    # Real conversion
+    if is_in_list "$ext" "${archive_exts[@]}"; then
+        # Drive conversion from archive_entries so output naming matches expected_chds
+        for entry in "${archive_entries[@]}"; do
+            local extracted="$temp_dir/$entry"
+            [[ -f "$extracted" ]] || continue
+
+            local extracted_ext="${extracted##*.}"; extracted_ext="${extracted_ext,,}"
+            if [[ "$extracted_ext" == "cue" || "$extracted_ext" == "gdi" || "$extracted_ext" == "ccd" ]]; then
+                if ! validate_descriptor_file "$extracted"; then
+                    log ERROR "❌ Extracted descriptor validation failed: $entry"
+                    input_failed=true
+                    continue
+                fi
+            fi
+
+            local chd_name chd_base
+            chd_name="$(archive_entry_to_chd_name "$entry")"   # e.g. "CD1 - Game.chd"
+            chd_base="${chd_name%.chd}"                        # e.g. "CD1 - Game"
+
+            [[ "${output_states[$chd_name]:-missing}" == "already_verified" ]] && continue
+
+            local converted_tmp=""
+            if convert_disc_file "$extracted" "$outdir" "$chd_base" converted_tmp; then
+                if [[ -n "$converted_tmp" ]]; then
+                    tmp_chds+=("$converted_tmp")
+                    final_chds+=("$outdir/$chd_name")
+                    output_temps["$chd_name"]="$converted_tmp"
+                    output_states["$chd_name"]="converted_pending_verification"
+                fi
             else
-                failures=$((failures + 1))
+                output_states["$chd_name"]="failed"
+                input_failed=true
+            fi
+        done
+
+        # We no longer need the extracted archive contents at this point
+        cleanup_temp_dir_now "$temp_dir"
+        temp_dir=""
+
+    else
+        # Non-archive inputs keep the old behaviour
+        for disc in "${disc_files[@]}"; do
+            local chd_name
+            chd_name="$(get_chd_basename "$disc").chd"
+            [[ "${output_states[$chd_name]:-missing}" == "already_verified" ]] && continue
+
+            local converted_tmp=""
+            if convert_disc_file "$disc" "$outdir" "" converted_tmp; then
+                if [[ -n "$converted_tmp" ]]; then
+                    tmp_chds+=("$converted_tmp")
+                    final_chds+=("$outdir/$chd_name")
+                    output_temps["$chd_name"]="$converted_tmp"
+                    output_states["$chd_name"]="converted_pending_verification"
+                fi
+            else
+                output_states["$chd_name"]="failed"
+                input_failed=true
             fi
         done
     fi
 
-    # Verify .tmp CHDs and finalize
+    # Verify and finalise pending outputs independently. Existing verified
+    # outputs are never added to this temporary-output verification pass.
     if [[ "$DRY_RUN" != true && ${#tmp_chds[@]} -gt 0 ]]; then
-        if verify_chds "$outdir" "${tmp_chds[@]##*/}"; then
-            for tmp_chd in "${tmp_chds[@]}"; do
-                local final_chd="${tmp_chd%.tmp}"
+        local chd_name tmp_chd final_chd
+        for chd_name in "${expected_chds[@]}"; do
+            [[ "${output_states[$chd_name]:-missing}" == "converted_pending_verification" ]] || continue
+            tmp_chd="${output_temps[$chd_name]}"
+            final_chd="$outdir/$chd_name"
+            if verify_chds "" "$tmp_chd"; then
                 mv -f -- "$tmp_chd" "$final_chd"
+                untrack_temp_file "$tmp_chd"
+                cleanup_temp_dir_now "$(dirname "$tmp_chd")"
                 log INFO "🔄 Replaced old CHD with new verified CHD: $final_chd"
                 chds_created=$((chds_created + 1))
-            done
-
-            if [[ "$KEEP_ORIGINALS" != true ]]; then
-                if [[ "$DRY_RUN" == true ]]; then
-                    log INFO "🧪 (dry-run) Would remove original input file: $input_file"
-                else
-                    log INFO "🗑️ Removing original input file: $input_file"
-                    rm -f -- "$input_file"
-                fi
+                output_states["$chd_name"]="finalised"
             else
-                log INFO "📦 Keeping original input file due to KEEP_ORIGINALS=true"
+                cleanup_temp_file_now "$tmp_chd"
+                cleanup_temp_dir_now "$(dirname "$tmp_chd")"
+                output_states["$chd_name"]="failed"
+                input_failed=true
+                log WARN "⚠️ CHD verification failed after conversion for $chd_name"
             fi
-            
-            for chd in "${expected_chds[@]}"; do
-                if [[ -f "$outdir/$chd" ]]; then
-                    archive_chd_size=$((archive_chd_size + $(get_file_size "$outdir/$chd")))
-                fi
-            done
-            if [[ $archive_size_bytes -gt 0 ]]; then
-                local saving=$((archive_size_bytes - archive_chd_size))
-                local saving_percent=$((100 * saving / archive_size_bytes))
-                log INFO "📉 Space saving for $(basename "$input_file"): $(human_readable "$archive_size_bytes") → $(human_readable "$archive_chd_size"), saved $(human_readable "$saving") (${saving_percent}%)"
-                total_original_size=$((total_original_size + archive_size_bytes))
-                total_chd_size=$((total_chd_size + archive_chd_size))
-            fi
-        else
-            for tmp_chd in "${tmp_chds[@]}"; do
-                if [[ -f "$tmp_chd" ]]; then
-                    rm -f "$tmp_chd"
-                    log INFO "🗑️ Removed failed tmp CHD: $tmp_chd"
-                fi
-            done
-            failures=$((failures + 1))
-            log WARN "⚠️ CHD verification failed after conversion for $input_file, keeping original"
-        fi
+        done
     fi
 
-    # Per-iteration M3U generation for newly written CHDs
+    if [[ "$input_failed" == true ]] || ! _all_outputs_complete; then
+        log WARN "⚠️ Not all expected members converted successfully for $input_file, keeping original"
+        _return_failed_input
+        return 1
+    fi
+
+    # Source deletion, accounting, and M3U generation all consume the same
+    # complete manifest rather than independently inferring success.
+    for chd_name in "${expected_chds[@]}"; do
+        archive_chd_size=$((archive_chd_size + $(get_file_size "$outdir/$chd_name")))
+    done
+    if [[ $archive_size_bytes -gt 0 ]]; then
+        local saving=$((archive_size_bytes - archive_chd_size))
+        local saving_percent=$((100 * saving / archive_size_bytes))
+        log INFO "📉 Space saving for $(basename "$input_file"): $(human_readable "$archive_size_bytes") → $(human_readable "$archive_chd_size"), saved $(human_readable "$saving") (${saving_percent}%)"
+        total_original_size=$((total_original_size + archive_size_bytes))
+        total_chd_size=$((total_chd_size + archive_chd_size))
+    fi
+
     if [[ ${#expected_chds[@]} -gt 0 ]]; then
         local chd_base
         chd_base="$(basename "${expected_chds[0]}" .chd)"
         log DEBUG "🔤 Raw base name: $chd_base"
         maybe_generate_m3u_for "$chd_base" "$outdir"
     fi
+
+    _remove_input_if_allowed
 
     return 0
 }
@@ -1252,9 +1732,7 @@ log INFO "🔎 Found ${#all_inputs[@]} inputs"
 
 for input in "${all_inputs[@]}"; do
     log INFO "▶️ Processing file: $input"
-    if ! process_input "$input"; then
-        log ERROR "⚠️ Failed to process $input"
-    fi
+    process_input "$input" || log ERROR "⚠️ Failed to process $input"
 done
 
 log INFO "📊 Summary:"
@@ -1269,4 +1747,10 @@ log INFO "📦 Archives processed: $archives_processed"
 log INFO "💿 CHDs created:       $chds_created"
 log INFO "❌ Failures:           $failures"
 log INFO "⏱️ Elapsed time: $(format_duration $(( $(date +%s) - script_start_time )))"
-log INFO "✅ Done!"
+if [[ $failures -gt 0 ]]; then
+    log ERROR "⚠️ Completed with failures ($failures input(s) failed)."
+    exit 2
+fi
+
+log INFO "✅ Completed successfully."
+exit 0
