@@ -372,6 +372,138 @@ select_preferred_disc_candidates() {
     fi
 }
 
+is_safe_relative_path() {
+    local path="${1//\\//}"
+    [[ -n "$path" && "$path" != /* && ! "$path" =~ ^[[:alpha:]]: && "$path" != //* ]] || return 1
+    local part
+    IFS='/' read -r -a _path_parts <<< "$path"
+    for part in "${_path_parts[@]}"; do
+        [[ "$part" != ".." ]] || return 1
+    done
+}
+
+# Resolve each path component independently. This preserves safe subdirectories,
+# permits case-insensitive media layouts, and rejects ambiguous case-fold matches.
+resolve_descriptor_reference() {
+    local base_dir="$1" ref="${2//\\//}" current="$1" part match
+    is_safe_relative_path "$ref" || return 1
+    IFS='/' read -r -a _ref_parts <<< "$ref"
+    for part in "${_ref_parts[@]}"; do
+        [[ -n "$part" && "$part" != "." ]] || continue
+        if [[ -e "$current/$part" ]]; then
+            current="$current/$part"
+            continue
+        fi
+        local -a matches=()
+        while IFS= read -r -d '' match; do matches+=("$match"); done < <(
+            find "$current" -mindepth 1 -maxdepth 1 -iname "$part" -print0 2>/dev/null
+        )
+        (( ${#matches[@]} == 1 )) || return 1
+        current="${matches[0]}"
+    done
+    [[ -f "$current" ]] || return 1
+    printf '%s\n' "$current"
+}
+
+DESCRIPTOR_SOURCE_SET=()
+
+validate_descriptor_file() {
+    local descriptor="$1" ext="${1##*.}" base_dir stem line ref resolved
+    ext="${ext,,}"
+    base_dir="$(dirname "$descriptor")"
+    stem="${descriptor%.*}"
+    DESCRIPTOR_SOURCE_SET=("$descriptor")
+
+    case "$ext" in
+        cue)
+            local unsupported_audio=0 found=0
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^[[:space:]]*FILE[[:space:]]+\"([^\"]+)\" ]]; then
+                    ref="${BASH_REMATCH[1]}"; found=1
+                    if ! is_safe_relative_path "$ref"; then
+                        log ERROR "❌ Unsafe path in CUE: $ref (required by $descriptor)"
+                        return 1
+                    fi
+                    if ! resolved="$(resolve_descriptor_reference "$base_dir" "$ref")"; then
+                        log ERROR "❌ Missing or ambiguous referenced file in CUE: $ref (required by $descriptor)"
+                        return 1
+                    fi
+                    DESCRIPTOR_SOURCE_SET+=("$resolved")
+                    case "${ref,,}" in
+                        *.mp3|*.ogg|*.opus|*.m4a|*.flac)
+                            if [[ "$ALLOW_UNVERIFIED_CUE_AUDIO" != true ]]; then
+                                log ERROR "❌ CUE references unsupported audio format: $ref"
+                                unsupported_audio=1
+                            fi ;;
+                    esac
+                fi
+            done < "$descriptor"
+            (( unsupported_audio == 0 )) || return 1
+            ;;
+        gdi)
+            local track_count=0
+            while IFS= read -r line; do
+                [[ "$line" =~ ^[[:space:]]*[0-9]+[[:space:]] ]] || continue
+                # GDI track filenames are the fifth field; quoted names may contain spaces.
+                ref="$(awk 'match($0,/^([^[:space:]]+[[:space:]]+){4}("[^"]+"|[^[:space:]]+)/){v=substr($0,RSTART,RLENGTH); sub(/^([^[:space:]]+[[:space:]]+){4}/,"",v); gsub(/^"|"$/,"",v); print v}' <<< "$line")"
+                [[ -n "$ref" ]] || { log ERROR "❌ Invalid GDI track entry: $line"; return 1; }
+                is_safe_relative_path "$ref" || { log ERROR "❌ Unsafe path in GDI: $ref"; return 1; }
+                resolved="$(resolve_descriptor_reference "$base_dir" "$ref")" || { log ERROR "❌ Missing or ambiguous GDI track: $ref"; return 1; }
+                DESCRIPTOR_SOURCE_SET+=("$resolved"); track_count=$((track_count + 1))
+            done < "$descriptor"
+            (( track_count > 0 )) || { log ERROR "❌ GDI contains no valid track entries: $descriptor"; return 1; }
+            ;;
+        ccd)
+            local companion
+            for companion in img sub; do
+                ref="$(basename "$stem").$companion"
+                resolved="$(resolve_descriptor_reference "$base_dir" "$ref")" || { log ERROR "❌ Missing CCD companion file: $ref"; return 1; }
+                DESCRIPTOR_SOURCE_SET+=("$resolved")
+            done
+            ;;
+        *) return 0 ;;
+    esac
+    log DEBUG "✅ Descriptor source-set validation passed: $descriptor"
+}
+
+validate_cue_file() { validate_descriptor_file "$1"; }
+
+validate_archive_member_paths() {
+    local member normalized part
+    for member in "$@"; do
+        normalized="${member//\\//}"
+        [[ "$normalized" == */ ]] && normalized="${normalized%/}"
+        [[ -z "$normalized" ]] && continue
+        if ! is_safe_relative_path "$normalized"; then
+            log ERROR "❌ Unsafe archive member path: $member"
+            return 1
+        fi
+    done
+}
+
+validate_archive_output_names() {
+    declare -A seen=()
+    local entry output key
+    for entry in "$@"; do
+        output="$(archive_entry_to_chd_name "$entry")"
+        key="${output,,}"
+        if [[ -n "${seen[$key]:-}" ]]; then
+            log ERROR "❌ Archive entries collide after output-name sanitisation: ${seen[$key]} and $entry -> $output"
+            return 1
+        fi
+        seen["$key"]="$entry"
+    done
+}
+
+validate_extracted_tree() {
+    local root="$1" link target
+    while IFS= read -r -d '' link; do
+        target="$(readlink -- "$link" 2>/dev/null || true)"
+        log ERROR "❌ Unsafe archive link rejected: ${link#"$root/"} -> $target"
+        return 1
+    done < <(find "$root" -type l -print0)
+}
+
 check_temp_storage "$TMPDIR"
 
 # ---------- chdman progress handling ----------
@@ -902,71 +1034,6 @@ verify_chds() {
     $all_verified && return 0 || return 1
 }
 
-validate_cue_file() {
-    local cue_file="$1"
-    local cuedir
-    cuedir="$(dirname "$cue_file")"
-    local cue_basename
-    cue_basename="$(basename "$cue_file")"
-    local missing=0
-    local unsupported_audio=0
-
-    declare -A file_map
-    while IFS= read -r -d '' f; do
-        file_map["${f,,}"]="$f"
-    done < <(find "$cuedir" -maxdepth 1 -type f -printf '%f\0')
-
-    while IFS= read -r line; do
-        if [[ "$line" =~ ^[[:space:]]*FILE[[:space:]]+\"([^\"]+)\" ]]; then
-            local ref="${BASH_REMATCH[1]}"
-            local ref_norm="${ref//\\\\//}"
-            local ref_basename; ref_basename="$(basename "$ref_norm")"
-            local ref_lower="${ref_basename,,}"
-
-            [[ "$ref_lower" == "${cue_basename,,}" ]] && continue
-
-            if [[ "$ref_norm" == /* || "$ref_norm" == *".."* ]]; then
-                log WARN "⚠️ Skipping unsafe external path in CUE: $ref_basename"
-                continue
-            fi
-
-            if [[ -z "${file_map["$ref_lower"]:-}" ]]; then
-                log ERROR "❌ Missing referenced file in CUE: $ref_basename (required by $cue_file)"
-                missing=1
-                continue
-            fi
-
-            case "$ref_lower" in
-                *.wav)
-                    log DEBUG "🎵 CUE file references WAV audio track: $ref_basename"
-                    ;;
-                *.mp3|*.ogg|*.opus|*.m4a)
-                    if [[ "$ALLOW_UNVERIFIED_CUE_AUDIO" == true ]]; then
-                        log WARN "⚠️ CUE file references lossy/unsupported audio format, but override is enabled: $ref_basename"
-                    else
-                        log ERROR "❌ CUE file references lossy/unsupported audio format: $ref_basename"
-                        unsupported_audio=1
-                    fi
-                    ;;
-                *.flac)
-                    if [[ "$ALLOW_UNVERIFIED_CUE_AUDIO" == true ]]; then
-                        log WARN "⚠️ CUE file references FLAC audio track, but override is enabled: $ref_basename"
-                    else
-                        log ERROR "❌ CUE file references FLAC audio track: $ref_basename (lossless, but chdman input support is not yet confirmed)"
-                        unsupported_audio=1
-                    fi
-                    ;;
-            esac
-        fi
-    done < "$cue_file"
-
-    if (( missing == 0 && unsupported_audio == 0 )); then
-        log DEBUG "✅ CUE validation passed: $cue_file"
-        return 0
-    fi
-    return 1
-}
-
 detect_disc_type() {
     log DEBUG "DEBUG: Starting detection for: $1"
     local img="$1"
@@ -1002,18 +1069,19 @@ detect_disc_type() {
                     low=tolower(ref)
                     gsub(/\\/, "/", low)
                     # pick first "data-ish" file
-                    if (low ~ /\.(bin|iso|img|mdf)$/) { print ref; exit }
+                    if (low ~ /\.(bin|iso|img|mdf)$/) { print ref; selected=1; exit }
                     # otherwise remember first FILE as fallback
                     if (first == "") first = ref
                 }
-                END { if (first != "") print first }
+                END { if (!selected && first != "") print first }
             ' "$img"
         )"
 
         # Normalize Windows path separators
         raw_ref="${raw_ref//\\//}"
 
-        local sniff_candidate="$cue_dir/$raw_ref"
+        local sniff_candidate=""
+        sniff_candidate="$(resolve_descriptor_reference "$cue_dir" "$raw_ref" 2>/dev/null || true)"
 
         log DEBUG "DEBUG: CUE selected sniff candidate: [$raw_ref]"
         log DEBUG "DEBUG: Full resolved sniff path:     [$sniff_candidate]"
@@ -1089,10 +1157,10 @@ convert_disc_file() {
 
     [[ -n "$result_var" ]] && printf -v "$result_var" '%s' ""
 
-    # If it's a CUE, validate referenced files first
-    if [[ "${file,,}" == *.cue ]]; then
-        if ! validate_cue_file "$file"; then
-            log ERROR "❌ CUE validation failed: $file"
+    local file_ext="${file##*.}"; file_ext="${file_ext,,}"
+    if [[ "$file_ext" == "cue" || "$file_ext" == "gdi" || "$file_ext" == "ccd" ]]; then
+        if ! validate_descriptor_file "$file"; then
+            log ERROR "❌ Descriptor validation failed: $file"
             return 1
         fi
     fi
@@ -1243,6 +1311,7 @@ process_input() {
     local outdir
     outdir="$(dirname "$input_file")"
     local archive_entries=()
+    local archive_all_entries=()
     local archive_listing=""
     local archive_listing_exit=0
     local disc_files=()
@@ -1254,6 +1323,7 @@ process_input() {
     local temp_dir=""
     declare -A output_states=()
     declare -A output_temps=()
+    local direct_source_set=()
 
     _all_outputs_complete() {
         local expected state
@@ -1280,8 +1350,16 @@ process_input() {
             return 0
         fi
 
-        log INFO "🗑️ Removing original input file: $input_file"
-        rm -f -- "$input_file"
+        if (( ${#direct_source_set[@]} > 0 )); then
+            local source
+            for source in "${direct_source_set[@]}"; do
+                log INFO "🗑️ Removing validated descriptor source: $source"
+                rm -f -- "$source"
+            done
+        else
+            log INFO "🗑️ Removing original input file: $input_file"
+            rm -f -- "$input_file"
+        fi
     }
 
     if is_in_list "$ext" "${archive_exts[@]}"; then
@@ -1305,12 +1383,28 @@ process_input() {
         fi
 
         case "$ext" in
+            zip|rar) mapfile -t archive_all_entries <<< "$archive_listing" ;;
+            # The first Path field describes the archive itself. Member records
+            # begin after the separator in 7z's technical listing.
+            7z|7zip) mapfile -t archive_all_entries < <(awk 'seen && /^Path = /{print substr($0,8)} /^----------$/{seen=1}' <<< "$archive_listing") ;;
+        esac
+        if ! validate_archive_member_paths "${archive_all_entries[@]}"; then
+            log ERROR "❌ Archive path preflight failed: $input_file"
+            _return_failed_input
+            return 1
+        fi
+
+        case "$ext" in
             zip|rar) mapfile -t archive_entries < <(grep -Ei "$ext_regex" <<< "$archive_listing" || true) ;;
-            7z|7zip) mapfile -t archive_entries < <(awk -v IGNORECASE=1 -v re="$ext_regex" '/^Path = /{p=substr($0,8); if(p~re) print p}' <<< "$archive_listing") ;;
+            7z|7zip) mapfile -t archive_entries < <(awk -v IGNORECASE=1 -v re="$ext_regex" 'seen && /^Path = /{p=substr($0,8); if(p~re) print p} /^----------$/{seen=1}' <<< "$archive_listing") ;;
         esac
 
         if [[ ${#archive_entries[@]} -gt 0 ]]; then
             mapfile -t archive_entries < <(select_preferred_disc_candidates "${archive_entries[@]}")
+            if ! validate_archive_output_names "${archive_entries[@]}"; then
+                _return_failed_input
+                return 1
+            fi
             log DEBUG "📀 Selected ${#archive_entries[@]} preferred disc descriptor(s) from archive: $(basename "$input_file")"
             for entry in "${archive_entries[@]}"; do
                 local expected_chd
@@ -1332,13 +1426,19 @@ process_input() {
         return 0
     fi
 
-    # If this input is a CUE, validate it even if CHDs already exist.
-    # Broken CUEs should count as an input failure (even if we can skip conversion).
-    if [[ "$ext" == "cue" ]]; then
-        if ! validate_cue_file "$input_file"; then
-            log ERROR "❌ CUE validation failed (input considered failed): $input_file"
+    # Direct descriptors own a complete validated source set. On success, all
+    # members are removed together; on any failure, every source is retained.
+    if [[ "$ext" == "cue" || "$ext" == "gdi" || "$ext" == "ccd" ]]; then
+        if ! validate_descriptor_file "$input_file"; then
+            log ERROR "❌ Descriptor validation failed (input considered failed): $input_file"
             input_failed=true
+        else
+            direct_source_set=("${DESCRIPTOR_SOURCE_SET[@]}")
         fi
+    fi
+    if [[ "$input_failed" == true ]]; then
+        _return_failed_input
+        return 1
     fi
 
     # Establish one authoritative state for every expected output.
@@ -1402,9 +1502,12 @@ process_input() {
                 return 1
             fi
 
-            log DEBUG "🧹 Flushing extraction buffers to free up RAM..."
-            sync
-            sleep 1
+            if ! validate_extracted_tree "$temp_dir"; then
+                input_failed=true
+                cleanup_temp_dir_now "$temp_dir"
+                _return_failed_input
+                return 1
+            fi
 
             read -r -a disc_find_expr <<< "$(build_find_expr "${disc_exts[@]}")"
             mapfile -d '' -t disc_files < <(find "$temp_dir" -type f \( "${disc_find_expr[@]}" \) -print0)
@@ -1458,6 +1561,15 @@ process_input() {
         for entry in "${archive_entries[@]}"; do
             local extracted="$temp_dir/$entry"
             [[ -f "$extracted" ]] || continue
+
+            local extracted_ext="${extracted##*.}"; extracted_ext="${extracted_ext,,}"
+            if [[ "$extracted_ext" == "cue" || "$extracted_ext" == "gdi" || "$extracted_ext" == "ccd" ]]; then
+                if ! validate_descriptor_file "$extracted"; then
+                    log ERROR "❌ Extracted descriptor validation failed: $entry"
+                    input_failed=true
+                    continue
+                fi
+            fi
 
             local chd_name chd_base
             chd_name="$(archive_entry_to_chd_name "$entry")"   # e.g. "CD1 - Game.chd"
