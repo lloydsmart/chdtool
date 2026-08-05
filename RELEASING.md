@@ -133,6 +133,10 @@ a backport pull request from `main` into `develop` so both long-lived branches
 contain the release merge, tag history, and generated changelog. Resolve the
 backport before starting further release work.
 
+Both `main` and `develop` must have GitHub branch protection enabled, with branch
+deletion and force pushes disabled. This prevents GitHub's automatic head-branch
+deletion from removing `main` after the backport pull request is merged.
+
 ## Failure handling
 
 - If preflight checks or local packaging fail, fix them on the release branch;
