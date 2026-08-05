@@ -21,7 +21,10 @@ make_archive "$archive" "Resume Game (Disc 1).iso" "Resume Game (Disc 2).iso"
 create_log="$FIX/create.log"
 CHDMAN_CREATE_LOG="$create_log" bash "$SCRIPT" "$FIX"
 [[ "$(cat "$FIX/Resume Game (Disc 1).chd")" == "existing-valid" ]] || { echo "FAIL: valid CHD replaced" >&2; exit 1; }
-[[ "$(wc -l < "$create_log")" -eq 1 ]] && grep -q 'Disc 2' "$create_log" || { echo "FAIL: expected only Disc 2 conversion" >&2; exit 1; }
+if [[ "$(wc -l < "$create_log")" -ne 1 ]] || ! grep -q 'Disc 2' "$create_log"; then
+  echo "FAIL: expected only Disc 2 conversion" >&2
+  exit 1
+fi
 [[ -f "$FIX/Resume Game (Disc 2).chd" && -f "$FIX/Resume Game.m3u" && ! -e "$archive" ]] || { echo "FAIL: resumed set incomplete" >&2; exit 1; }
 
 printf 'INVALID\n' > "$FIX/Replace Game.chd"
