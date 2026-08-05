@@ -22,6 +22,7 @@ case "$1" in
     exit 0
     ;;
   createcd|createdvd)
+    [[ -n "${CHDMAN_ARGS_LOG:-}" ]] && printf '%s\n' "$*" >> "$CHDMAN_ARGS_LOG"
     input=""
     output=""
     while [[ $# -gt 0 ]]; do
