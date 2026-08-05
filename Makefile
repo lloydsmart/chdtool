@@ -3,9 +3,9 @@ SHELL := /usr/bin/env bash
 # Path to your script; override with: make test SCRIPT=./path/to/script.sh
 SCRIPT ?= ./chdtool.sh
 
-.PHONY: test test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-exit-status test-logging test-security-validation test-resource-handling test-setup clean changelog changelog-tag
+.PHONY: test test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-exit-status test-logging test-security-validation test-resource-handling test-regression-gaps test-setup clean changelog changelog-tag
 
-test: test-setup test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-exit-status test-logging test-security-validation test-resource-handling
+test: test-setup test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-exit-status test-logging test-security-validation test-resource-handling test-regression-gaps
 
 test-setup:
 	chmod +x tests/bin/chdman
@@ -17,6 +17,7 @@ test-setup:
 	chmod +x tests/test_exit_status.sh
 	chmod +x tests/test_security_validation.sh
 	chmod +x tests/test_resource_handling.sh
+	chmod +x tests/test_regression_gaps.sh
 	@if [ -f tests/test_logging.sh ]; then chmod +x tests/test_logging.sh; fi
 
 test-m3u:
@@ -49,6 +50,9 @@ test-security-validation:
 
 test-resource-handling:
 	SCRIPT=$(SCRIPT) bash tests/test_resource_handling.sh
+
+test-regression-gaps:
+	SCRIPT=$(SCRIPT) bash tests/test_regression_gaps.sh
 
 clean:
 	@echo "Nothing to clean; tests use mktemp dirs."

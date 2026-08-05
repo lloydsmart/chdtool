@@ -13,6 +13,11 @@ case "$1" in
         *) shift ;;
       esac
     done
+    [[ -n "${CHDMAN_VERIFY_LOG:-}" ]] && printf '%s\n' "$verify_input" >> "$CHDMAN_VERIFY_LOG"
+    if [[ -n "${CHDMAN_FAIL_VERIFY_INPUT:-}" && "$verify_input" == *"$CHDMAN_FAIL_VERIFY_INPUT"* ]]; then
+      echo "stub chdman: requested verification failure for $verify_input" >&2
+      exit 2
+    fi
     if [[ -f "$verify_input" ]] && grep -q '^INVALID$' "$verify_input"; then
       echo "invalid CHD" >&2
       exit 2
