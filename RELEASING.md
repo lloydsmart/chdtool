@@ -25,10 +25,10 @@ The final command should print nothing.
 ## 1. Choose and set the version
 
 Choose the next version according to Semantic Versioning. Create a release
-branch from `develop`:
+branch from `develop`. Keep the `v` in the branch name when using git-flow:
 
 ```bash
-git switch -c release/0.2.5
+git switch -c release/v0.2.5
 ```
 
 Update `CHDTOOL_VERSION` near the top of `chdtool.sh`. Confirm that the CLI
@@ -76,19 +76,20 @@ with these files:
 
 The `dist/` directory is rebuilt from scratch by the packaging command.
 
-## 3. Merge the release change
+## 3. Promote the release to main
 
-Commit the version change, push the release branch, and open a pull request into
-`develop`:
+Commit the version change, push the release branch, and open a pull request
+directly into `main`:
 
 ```bash
 git add chdtool.sh
 git commit -m "chore: prepare v0.2.5"
-git push -u origin release/0.2.5
+git push -u origin release/v0.2.5
 ```
 
-Merge only after all required checks pass. Then open and merge a pull request
-from `develop` into `main`. Do not tag the release branch or an unmerged commit.
+The pull request represents the complete promotion of the release candidate
+from `develop` to `main`. Merge only after all required checks pass. Do not tag
+the release branch or an unmerged commit.
 
 ## 4. Tag and publish
 
@@ -127,9 +128,10 @@ On the GitHub release page, confirm:
 - `chdtool`, both archives, and `SHA256SUMS` are attached; and
 - downloaded assets pass `sha256sum --check SHA256SUMS`.
 
-Merge the automated changelog pull request after its checks pass. Finally,
-merge or fast-forward `main` back into `develop` so both long-lived branches
-contain the release tag's code and generated changelog.
+Merge the automated changelog pull request after its checks pass. Finally, open
+a backport pull request from `main` into `develop` so both long-lived branches
+contain the release merge, tag history, and generated changelog. Resolve the
+backport before starting further release work.
 
 ## Failure handling
 

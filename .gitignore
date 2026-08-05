@@ -17,6 +17,8 @@ logs/
 *.7z
 *.rar
 *.tmp
+/chdtool
+/dist/
 
 # Python virtual envs (if any tooling is added later)
 .venv/

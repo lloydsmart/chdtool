@@ -47,7 +47,8 @@ jobs:
         run: |
           set -euo pipefail
           release_version="${GITHUB_REF_NAME#v}"
-          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" \
+          DIST_DIR="${RUNNER_TEMP}/chdtool-dist" \
+            SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" \
             bash scripts/package-release.sh "$release_version"
 
       - name: Create GitHub Release and upload assets
@@ -56,7 +57,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           body_path: ${{ steps.cliff_notes.outputs.changelog }}   # file generated above
           files: |
-            dist/*
+            ${{ runner.temp }}/chdtool-dist/*
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:

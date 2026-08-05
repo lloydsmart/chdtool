@@ -1,3 +1,36 @@
+## [0.2.5] - 2026-02-07
+
+### Chores
+
+- *(changelog)* Update for v0.2.4
+- Initialize IS_RAM_DISK to false
+- Add post-conversion sync and cooldown period
+
+### Features
+
+- Implement resource-aware thread scaling using total virtual memory
+- Implement console fingerprinting and hunk size optimisation
+- Align CD hunk sizes to 2448 bytes for chdman compatibility
+
+### Fixes
+
+- *(chdman)* Relax createdvd feature detection regex
+- *(chdman)* Handle exit status for createdvd feature detection
+- *(chdman)* Correct createdvd feature detection and debug logging
+- *(chdtool)* Use disk-based temp directory for large file processing
+- *(chdtool)* Limit memory usage for chdman createdvd/createcd
+- Prevent OOM crashes by dynamically limiting chdman threads
+- Account for RAM disk (tmpfs) overhead in thread calculation
+- Move check_temp_storage definition before its first call
+- Syntax error in chdtool.sh
+- *(shellcheck)* SC2155 (warning): Declare and assign separately to avoid masking return values.
+- Resolve bash syntax error and optimize disc sniffing I/O
+- Unify subcommand and hunk-size mapping for ps2/psp/dvd
+- Resolve progress bar stalling by handling carriage returns
+
+### Performance
+
+- Optimize thread calculation for high-memory environments
 ## [0.2.4] - 2025-08-28
 
 ### CI
