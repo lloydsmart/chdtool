@@ -61,7 +61,7 @@ TMP_ROOT="${TMPDIR:-/var/tmp/chdtool}"
 TMPDIR="$TMP_ROOT/$RUN_ID"
 mkdir -p "$TMPDIR"
 
-LOGFILE="logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log"
+LOGFILE="${LOGFILE:-logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log}"
 
 # --- Pluggable logging: console/file/syslog/journald (auto) -------------------
 # Control via env vars (no root needed to write to journald/syslog):
@@ -187,6 +187,10 @@ _emit_log() {
         done <<< "$msg"
         ;;
     esac
+
+    # Optional mirrors may legitimately be disabled. Logging still succeeded
+    # when the selected backend accepted the message.
+    return 0
 }
 
 # Public logger. Backwards-compatible: `log "message"` still works.
