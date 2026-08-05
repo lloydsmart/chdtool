@@ -6,7 +6,7 @@ script_start_time=$(date +%s)
 shopt -s nullglob
 shopt -s extglob
 
-CHDTOOL_VERSION="0.2.4"
+CHDTOOL_VERSION="0.3.0"
 PROGRAM_NAME="$(basename -- "$0")"
 USAGE="Usage: $PROGRAM_NAME [options] [--] <input directory>"
 
