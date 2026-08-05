@@ -12,7 +12,6 @@ RECURSIVE=false
 DRY_RUN=false
 ALLOW_UNVERIFIED_CUE_AUDIO=false
 INPUT_DIR=""
-IS_RAM_DISK=false
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 CHDMAN_MSG_LEVEL="${CHDMAN_MSG_LEVEL:-DEBUG}"
 case "${CHDMAN_MSG_LEVEL^^}" in
@@ -330,8 +329,6 @@ check_temp_storage() {
         log WARN "⚠️ $tmp_dir is a RAM disk (tmpfs). Extracted ISOs will consume physical RAM!"
         log WARN "💡 Available space in RAM disk: $tmp_limit"
 
-        # Force thread reduction if we are in a RAM disk
-        IS_RAM_DISK=true
     fi
 }
 
@@ -416,10 +413,10 @@ validate_descriptor_file() {
 
     case "$ext" in
         cue)
-            local unsupported_audio=0 found=0
+            local unsupported_audio=0
             while IFS= read -r line; do
                 if [[ "$line" =~ ^[[:space:]]*FILE[[:space:]]+\"([^\"]+)\" ]]; then
-                    ref="${BASH_REMATCH[1]}"; found=1
+                    ref="${BASH_REMATCH[1]}"
                     if ! is_safe_relative_path "$ref"; then
                         log ERROR "❌ Unsafe path in CUE: $ref (required by $descriptor)"
                         return 1
@@ -465,8 +462,6 @@ validate_descriptor_file() {
     esac
     log DEBUG "✅ Descriptor source-set validation passed: $descriptor"
 }
-
-validate_cue_file() { validate_descriptor_file "$1"; }
 
 validate_archive_member_paths() {
     local member normalized part
@@ -1544,8 +1539,7 @@ process_input() {
 
     if [[ "$DRY_RUN" == true ]]; then
         for disc in "${disc_files[@]}"; do
-            local dry_result=""
-            convert_disc_file "$disc" "$outdir" "" dry_result || input_failed=true
+            convert_disc_file "$disc" "$outdir" || input_failed=true
         done
 
         # Dry-run: also show M3U intent (if this looks like a multi-disc set)
