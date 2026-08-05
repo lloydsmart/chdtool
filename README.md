@@ -197,12 +197,30 @@ Use `--dry-run` to preview actions:
 - No files are created, moved, or deleted
 - All intended operations are logged
 
+### Resource selection
+
+By default, CHD Tool lets `chdman` choose its format-appropriate hunk size. It
+selects compression threads conservatively from Linux `MemAvailable` (never
+swap), using roughly 2 GiB per CD thread or 4 GiB per DVD thread, and caps the
+result at the available CPU count with a minimum of one.
+
+- `CHDMAN_THREADS=N` requests a positive thread count; values above the CPU count
+  are capped
+- `CHDMAN_HUNK_SIZE=N` is an advanced opt-in that passes `-hs N` to `chdman`
+
 ---
 
 ## ⚠️ Notes
 
 - DVD support requires a version of `chdman` with `createdvd`
 - CUE files referencing missing files will fail validation
+- CUE/GDI/CCD paths must be relative and remain below the descriptor directory;
+  nested paths and unambiguous case-insensitive matches are supported
+- A successfully converted direct descriptor is treated as one source set: unless
+  `--keep-originals` is used, the descriptor and all validated companion tracks
+  are removed together. Any validation or conversion failure retains the full set
+- Archive members are rejected before conversion when paths escape the extraction
+  directory, links are present, or selected entries collide after name sanitisation
 - Temporary files are cleaned automatically, even on interruption
 
 ---

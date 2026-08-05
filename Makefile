@@ -3,9 +3,9 @@ SHELL := /usr/bin/env bash
 # Path to your script; override with: make test SCRIPT=./path/to/script.sh
 SCRIPT ?= ./chdtool.sh
 
-.PHONY: test test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-exit-status test-logging test-setup clean changelog changelog-tag
+.PHONY: test test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-exit-status test-logging test-security-validation test-resource-handling test-setup clean changelog changelog-tag
 
-test: test-setup test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-exit-status test-logging
+test: test-setup test-m3u test-m3u-single test-partial-resume test-transactional-source-deletion test-temporary-chd-cleanup test-exit-status test-logging test-security-validation test-resource-handling
 
 test-setup:
 	chmod +x tests/bin/chdman
@@ -15,6 +15,8 @@ test-setup:
 	chmod +x tests/test_temporary_chd_cleanup.sh
 	chmod +x tests/test_partial_resume.sh
 	chmod +x tests/test_exit_status.sh
+	chmod +x tests/test_security_validation.sh
+	chmod +x tests/test_resource_handling.sh
 	@if [ -f tests/test_logging.sh ]; then chmod +x tests/test_logging.sh; fi
 
 test-m3u:
@@ -41,6 +43,12 @@ test-logging:
 	else \
 	  echo "Skipping logging test (tests/test_logging.sh not present)"; \
 	fi
+
+test-security-validation:
+	SCRIPT=$(SCRIPT) bash tests/test_security_validation.sh
+
+test-resource-handling:
+	SCRIPT=$(SCRIPT) bash tests/test_resource_handling.sh
 
 clean:
 	@echo "Nothing to clean; tests use mktemp dirs."
