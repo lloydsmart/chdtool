@@ -21,6 +21,16 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Install test and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make shellcheck unzip zip
+
+      - name: Run tests and ShellCheck
+        run: |
+          make test
+          shellcheck chdtool.sh scripts/*.sh tests/*.sh tests/bin/*
+
       # Generate release notes for this tag (used as Release body)
       - name: Generate release notes with git-cliff
         id: cliff_notes
@@ -36,11 +46,9 @@ jobs:
       - name: Prepare artifacts
         run: |
           set -euo pipefail
-          chmod +x chdtool.sh || true
-          cp chdtool.sh chdtool
-          mkdir -p dist
-          tar -czf "dist/chdtool-${GITHUB_REF_NAME}.tar.gz" chdtool README.md LICENSE CHANGELOG.md || true
-          zip -j "dist/chdtool-${GITHUB_REF_NAME}.zip" chdtool README.md LICENSE CHANGELOG.md || true
+          release_version="${GITHUB_REF_NAME#v}"
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" \
+            bash scripts/package-release.sh "$release_version"
 
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
@@ -49,7 +57,6 @@ jobs:
           body_path: ${{ steps.cliff_notes.outputs.changelog }}   # file generated above
           files: |
             dist/*
-            chdtool.sh
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:

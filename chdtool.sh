@@ -6,7 +6,25 @@ script_start_time=$(date +%s)
 shopt -s nullglob
 shopt -s extglob
 
-USAGE="Usage: $0 [--keep-originals|-k] [--recursive|-r] [--dry-run|-n] [--allow-unverified-cue-audio|-a] [--file-tee|-F|--no-file-tee|-N] <input directory>"
+CHDTOOL_VERSION="0.2.4"
+PROGRAM_NAME="$(basename -- "$0")"
+USAGE="Usage: $PROGRAM_NAME [options] [--] <input directory>"
+
+print_usage() {
+  cat <<EOF
+$USAGE
+
+Options:
+  -k, --keep-originals              Do not delete source files
+  -r, --recursive                   Scan subdirectories
+  -n, --dry-run                     Preview operations without changing inputs
+  -a, --allow-unverified-cue-audio  Allow lossy/unverified CUE audio tracks
+  -F, --file-tee                    Enable file mirroring
+  -N, --no-file-tee                 Disable file mirroring
+  -h, --help                        Show this help and exit
+  -V, --version                     Show the version and exit
+EOF
+}
 KEEP_ORIGINALS=false
 RECURSIVE=false
 DRY_RUN=false
@@ -34,6 +52,19 @@ while [[ $# -gt 0 ]]; do
             LOG_TEE_FILE=1; shift ;;
         --no-file-tee|-N)
             LOG_TEE_FILE=0; shift ;;
+        --help|-h)
+            print_usage; exit 0 ;;
+        --version|-V)
+            printf '%s %s\n' "$PROGRAM_NAME" "$CHDTOOL_VERSION"; exit 0 ;;
+        --)
+            shift
+            if [[ -n "$INPUT_DIR" || $# -ne 1 ]]; then
+                echo "❌ Expected exactly one input directory after --" >&2
+                echo "$USAGE" >&2; exit 1
+            fi
+            INPUT_DIR="${1%/}"
+            shift
+            break ;;
         -*)
             echo "❌ Unknown option: $1" >&2
             echo "$USAGE" >&2; exit 1 ;;
@@ -51,6 +82,7 @@ done
 if [[ -z "$INPUT_DIR" ]]; then
   echo "$USAGE" >&2; exit 1
 fi
+[[ "$INPUT_DIR" == -* ]] && INPUT_DIR="./$INPUT_DIR"
 if [[ ! -d "$INPUT_DIR" ]]; then
   echo "❌ Input directory does not exist or is not a directory: $INPUT_DIR" >&2
   exit 1
@@ -59,7 +91,7 @@ fi
 # Use a disk-based temp directory to avoid filling up RAM
 TMP_ROOT="${TMPDIR:-/var/tmp/chdtool}"
 TMPDIR="$TMP_ROOT/$RUN_ID"
-mkdir -p "$TMPDIR"
+[[ "$DRY_RUN" == true ]] || mkdir -p "$TMPDIR"
 
 LOGFILE="${LOGFILE:-logs/chd_conversion_$(date +%Y%m%d_%H%M%S).log}"
 
@@ -113,7 +145,7 @@ if [[ "$LOG_BACKEND" == journald || "$LOG_BACKEND" == syslog ]]; then
 fi
 
 # ensure the logfile directory exists when we might write to it
-if [[ "$LOG_BACKEND" == file || "$LOG_BACKEND" == console ]] || __should_mirror_file; then
+if [[ "$LOG_BACKEND" == file ]] || __should_mirror_file; then
   mkdir -p -- "$(dirname -- "$LOGFILE")"
 fi
 
@@ -182,9 +214,13 @@ _emit_log() {
         __should_mirror_console && __console_print "$ts" "$lvl" "$msg"
         ;;
         console|*)
-        while IFS= read -r line; do
-            printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" | tee -a "$LOGFILE"
-        done <<< "$msg"
+        if __should_mirror_file; then
+            while IFS= read -r line; do
+                printf '[%s] %s: %s\n' "$ts" "$lvl" "$line" | tee -a "$LOGFILE"
+            done <<< "$msg"
+        else
+            __console_print "$ts" "$lvl" "$msg"
+        fi
         ;;
     esac
 
@@ -503,7 +539,7 @@ validate_extracted_tree() {
     done < <(find "$root" -type l -print0)
 }
 
-check_temp_storage "$TMPDIR"
+[[ "$DRY_RUN" == true ]] || check_temp_storage "$TMPDIR"
 
 # ---------- chdman progress handling ----------
 # Config: PROGRESS_STYLE=auto|bar|line|none ; default: auto (TTY -> bar, non-TTY -> none)
