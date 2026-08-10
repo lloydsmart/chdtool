@@ -54,7 +54,7 @@ When `actionlint` and `markdownlint-cli2` are available, also run:
 ```bash
 actionlint
 npx --yes markdownlint-cli2 "**/*.md" "#CHANGELOG.md" \
-  "#CHANGELOG_RELEASE.md" "#LICENSE.md"
+  "#CHANGELOG_RELEASE.md" "#LICENSE"
 ```
 
 Build and validate the release assets locally:
@@ -71,7 +71,7 @@ with these files:
 
 - `chdtool`
 - `README.md`
-- `LICENSE.md`
+- `LICENSE`
 - `CHANGELOG.md`
 
 The `dist/` directory is rebuilt from scratch by the packaging command.
