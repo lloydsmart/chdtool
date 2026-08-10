@@ -1,6 +1,6 @@
 # 🎮 chdtool
 
-[![License](https://img.shields.io/github/license/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/blob/main/LICENSE.md)
+[![License](https://img.shields.io/github/license/lloydsmart/chdtool)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/lloydsmart/chdtool)](https://github.com/lloydsmart/chdtool/releases)
 [![ShellCheck](https://img.shields.io/github/actions/workflow/status/lloydsmart/chdtool/shellcheck.yml?branch=main&label=shellcheck)](https://github.com/lloydsmart/chdtool/actions/workflows/shellcheck.yml)
 
@@ -251,7 +251,7 @@ result at the available CPU count with a minimum of one.
 ## 📦 Release assets
 
 Each release publishes `.tar.gz` and `.zip` archives containing `chdtool`,
-`README.md`, `LICENSE.md`, and `CHANGELOG.md`, plus a standalone `chdtool`
+`README.md`, `LICENSE`, and `CHANGELOG.md`, plus a standalone `chdtool`
 script. Verify downloads with the published checksum file:
 
 ```bash
@@ -279,3 +279,9 @@ than creating tags or assets manually.
 - Better metadata integration
 - Optional compression tuning
 - Integration with tools like Retromount / ROM managers
+
+---
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0 only](LICENSE).

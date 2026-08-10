@@ -33,7 +33,7 @@ stage_dir="$stage_root/$archive_base"
 mkdir -p "$stage_dir"
 
 install -m 0755 chdtool.sh "$stage_dir/chdtool"
-install -m 0644 README.md LICENSE.md CHANGELOG.md "$stage_dir/"
+install -m 0644 README.md LICENSE CHANGELOG.md "$stage_dir/"
 
 # Use the tagged commit timestamp when available, with a stable fallback for
 # source archives or local packaging outside a Git checkout.
@@ -56,7 +56,7 @@ install -m 0755 chdtool.sh "$dist_dir/chdtool"
 
 expected="$(printf '%s\n' \
   "$archive_base/CHANGELOG.md" \
-  "$archive_base/LICENSE.md" \
+  "$archive_base/LICENSE" \
   "$archive_base/README.md" \
   "$archive_base/chdtool")"
 tar_contents="$(tar -tzf "$dist_dir/$archive_base.tar.gz" | sed '/\/$/d' | LC_ALL=C sort)"
