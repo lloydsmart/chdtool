@@ -34,7 +34,7 @@ jobs:
       # Generate release notes for this tag (used as Release body)
       - name: Generate release notes with git-cliff
         id: cliff_notes
-        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
+        uses: orhun/git-cliff-action@3d96a18cc4ec17e9dc69ddcc424ccafaf1f78ce2 # v4
         with:
           config: cliff.toml
           # notes only for the pushed tag, without the big header
@@ -66,7 +66,7 @@ jobs:
       # Regenerate the full CHANGELOG.md for main and open a PR
       - name: Regenerate full CHANGELOG.md
         id: cliff_full
-        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
+        uses: orhun/git-cliff-action@3d96a18cc4ec17e9dc69ddcc424ccafaf1f78ce2 # v4
         with:
           config: cliff.toml
           args: -vv
